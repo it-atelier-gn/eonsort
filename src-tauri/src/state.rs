@@ -1,0 +1,46 @@
+use eonsort_core::copy::Outcome;
+use eonsort_core::Plan;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+
+#[derive(Default)]
+pub struct Session {
+    pub plan_path: Option<PathBuf>,
+    pub plan: Option<Plan>,
+    pub journal: HashMap<PathBuf, Outcome>,
+    pub busy: Option<String>,
+}
+
+pub struct AppState {
+    pub session: Mutex<Session>,
+    pub cancel: Arc<AtomicBool>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            session: Mutex::new(Session::default()),
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl AppState {
+    /// Marks a long-running job as started, refusing to launch a second one.
+    pub fn begin(&self, job: &str) -> Result<(), String> {
+        let mut session = self.session.lock().unwrap();
+        if let Some(running) = &session.busy {
+            return Err(format!("{running} is still running"));
+        }
+        session.busy = Some(job.to_string());
+        self.cancel
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    pub fn finish(&self) {
+        self.session.lock().unwrap().busy = None;
+    }
+}

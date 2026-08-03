@@ -1,0 +1,11 @@
+/target
+/build
+/.svelte-kit
+node_modules
+.history/
+.vscode
+.DS_Store
+PROJECT.md
+*.jsonl
+src-tauri/icons/source.png
+vite.config.js.timestamp-*
