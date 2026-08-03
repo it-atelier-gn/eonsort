@@ -11,6 +11,8 @@ Point it at your photo folders, press **Scan**, and you get a full preview of th
 
 Runs on Windows, Linux and macOS, as a desktop app and as an `eonsort` command line tool.
 
+![Eonsort desktop app](docs/screenshot.png)
+
 ---
 
 ## How the date is found
