@@ -36,7 +36,7 @@ jobs:
             artifact: eonsort-macos-arm64
             bundle_ext: dmg
 
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact: eonsort-macos-x64
             bundle_ext: dmg
