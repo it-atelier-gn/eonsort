@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::model::{duplicate_variant, PlanEntry};
-use crate::plan::read_plan;
+use crate::rotate::Written;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -57,7 +57,11 @@ pub fn verify(
     cancel: &AtomicBool,
     on_progress: &dyn Fn(VerifyProgress),
 ) -> Result<VerifyReport> {
-    let plan = read_plan(plan_path)?;
+    let plan = crate::overrides::load_plan(plan_path)?;
+    if plan.header.destination.is_none() {
+        return Err(Error::NoDestination);
+    }
+    let written = crate::copy::read_written(&crate::copy::journal_path(plan_path))?;
     let total = plan.entries.len() as u64;
     let mut report = VerifyReport::default();
     let mut counted = HashSet::new();
@@ -66,7 +70,15 @@ pub fn verify(
         if cancel.load(Ordering::Relaxed) {
             return Err(Error::Cancelled);
         }
-        check(entry, options, &mut report, &mut counted);
+        let expected = if entry.rotate.is_identity() {
+            Expected::Source
+        } else {
+            match written.get(&entry.source) {
+                Some(record) => Expected::Turned(record.clone()),
+                None => Expected::Unknown,
+            }
+        };
+        check(entry, options, &expected, &mut report, &mut counted);
         on_progress(VerifyProgress {
             checked: index as u64 + 1,
             total,
@@ -77,9 +89,16 @@ pub fn verify(
     Ok(report)
 }
 
+enum Expected {
+    Source,
+    Turned(Written),
+    Unknown,
+}
+
 fn check(
     entry: &PlanEntry,
     options: &VerifyOptions,
+    expected: &Expected,
     report: &mut VerifyReport,
     counted: &mut HashSet<PathBuf>,
 ) {
@@ -123,7 +142,12 @@ fn check(
             }
         }
 
-        if !matched && meta.len() == source_size && same_content(entry, &candidate, options) {
+        let size_matches = match expected {
+            Expected::Source => meta.len() == source_size,
+            Expected::Turned(record) => meta.len() == record.size,
+            Expected::Unknown => true,
+        };
+        if !matched && size_matches && same_content(entry, &candidate, options, expected) {
             matched = true;
         }
     }
@@ -151,20 +175,29 @@ fn check(
     }
 }
 
-fn same_content(entry: &PlanEntry, candidate: &Path, options: &VerifyOptions) -> bool {
+fn same_content(
+    entry: &PlanEntry,
+    candidate: &Path,
+    options: &VerifyOptions,
+    expected: &Expected,
+) -> bool {
     if !options.compare_hashes {
         return true;
     }
-    match (hash(&entry.source), hash(candidate)) {
-        (Some(a), Some(b)) => a == b,
-        _ => false,
+    match expected {
+        Expected::Unknown => true,
+        Expected::Turned(record) => hash(candidate).is_some_and(|found| found == record.hash),
+        Expected::Source => match (hash(&entry.source), hash(candidate)) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        },
     }
 }
 
-fn hash(path: &Path) -> Option<blake3::Hash> {
+fn hash(path: &Path) -> Option<String> {
     let mut hasher = blake3::Hasher::new();
     hasher.update_reader(fs::File::open(path).ok()?).ok()?;
-    Some(hasher.finalize())
+    Some(hasher.finalize().to_hex().to_string())
 }
 
 #[cfg(test)]
@@ -185,7 +218,7 @@ mod tests {
                 .and_hms_opt(0, 0, 0)
                 .unwrap(),
             sources: vec![dir.path().join("src")],
-            destination: dir.path().join("out"),
+            destination: Some(dir.path().join("out")),
             folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
             detect: DetectOptions::default(),
         };
@@ -208,7 +241,110 @@ mod tests {
             provider: Provider::Filename,
             provider_info: None,
             size,
+            ..PlanEntry::default()
         }
+    }
+
+    fn turned_entry(source: PathBuf, destination: PathBuf, size: u64) -> PlanEntry {
+        PlanEntry {
+            rotate: crate::rotate::Transform::Rotate90,
+            ..entry(source, destination, size)
+        }
+    }
+
+    fn journal_a_turn(plan: &Path, source: &Path, destination: &Path, body: &[u8]) {
+        let record = crate::copy::JournalRecord {
+            source: source.to_path_buf(),
+            outcome: crate::copy::Outcome::Copied {
+                destination: destination.to_path_buf(),
+            },
+            written: Some(Written {
+                size: body.len() as u64,
+                hash: blake3::hash(body).to_hex().to_string(),
+            }),
+        };
+        fs::write(
+            crate::copy::journal_path(plan),
+            format!("{}\n", serde_json::to_string(&record).unwrap()),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_turned_copy_is_checked_against_what_the_copy_wrote() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("a.jpg");
+        let dest = dir.path().join("out/2023/05/a.jpg");
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&src, b"the original bytes").unwrap();
+        fs::write(&dest, b"turned").unwrap();
+
+        let path = plan_with(vec![turned_entry(src.clone(), dest.clone(), 18)], &dir);
+        journal_a_turn(&path, &src, &dest, b"turned");
+
+        let report = verify(
+            &path,
+            &VerifyOptions {
+                compare_hashes: true,
+            },
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .unwrap();
+
+        assert_eq!(report.ok, 1);
+        assert!(report.issues.is_empty());
+    }
+
+    #[test]
+    fn a_turned_copy_that_was_tampered_with_is_reported() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("a.jpg");
+        let dest = dir.path().join("out/2023/05/a.jpg");
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&src, b"the original bytes").unwrap();
+        fs::write(&dest, b"meddled").unwrap();
+
+        let path = plan_with(vec![turned_entry(src.clone(), dest.clone(), 18)], &dir);
+        journal_a_turn(&path, &src, &dest, b"turned");
+
+        let report = verify(
+            &path,
+            &VerifyOptions {
+                compare_hashes: true,
+            },
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .unwrap();
+
+        assert_eq!(report.content_mismatch, 1);
+        assert_eq!(report.issues[0].kind, IssueKind::ContentMismatch);
+    }
+
+    #[test]
+    fn a_turned_copy_with_no_journal_left_is_only_checked_for_being_there() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("a.jpg");
+        let dest = dir.path().join("out/2023/05/a.jpg");
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&src, b"the original bytes").unwrap();
+        fs::write(&dest, b"turned").unwrap();
+
+        let path = plan_with(vec![turned_entry(src, dest, 18)], &dir);
+
+        let report = verify(
+            &path,
+            &VerifyOptions {
+                compare_hashes: true,
+            },
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .unwrap();
+
+        assert_eq!(report.ok, 1);
+        assert!(report.issues.is_empty());
     }
 
     #[test]

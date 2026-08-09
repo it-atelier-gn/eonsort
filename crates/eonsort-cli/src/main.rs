@@ -1,11 +1,14 @@
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use eonsort_core::ai::AiConfig;
 use eonsort_core::copy::{self, CopyOptions, CopyProgress};
 use eonsort_core::model::DEFAULT_FOLDER_PATTERN;
+use eonsort_core::overrides;
 use eonsort_core::providers::{DetectOptions, Provider, Strategy};
 use eonsort_core::scan::{ScanOptions, ScanPhase, ScanProgress};
+use eonsort_core::suspect::{self, EntryFacts, Flag, Severity};
 use eonsort_core::verify::{VerifyOptions, VerifyProgress, VerifyReport};
-use eonsort_core::{default_plan_name, read_plan, scan, verify};
+use eonsort_core::{default_plan_name, read_plan, retarget, scan, verify, Plan};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,9 +44,10 @@ struct ScanArgs {
     /// One or more source directories.
     #[arg(short, long, required = true, num_args = 1..)]
     source: Vec<PathBuf>,
-    /// Root directory the sorted tree is written to.
+    /// Root directory the sorted tree is written to. Optional for a scan: leave it out to plan
+    /// relative folders now and choose the destination later.
     #[arg(short, long)]
-    destination: PathBuf,
+    destination: Option<PathBuf>,
     /// Where to write the plan file.
     #[arg(short, long)]
     plan: Option<PathBuf>,
@@ -54,17 +58,33 @@ struct ScanArgs {
     #[arg(long, value_enum, num_args = 1.., default_values = ["filename", "exif", "media", "filesystem"])]
     provider: Vec<ProviderArg>,
     /// How to choose between the dates different providers report.
-    #[arg(long, value_enum, default_value = "oldest")]
+    #[arg(long, value_enum, default_value = "smart")]
     strategy: StrategyArg,
     /// Follow symbolic links while walking the sources.
     #[arg(long)]
     follow_symlinks: bool,
+    /// Turn sideways pictures upright when copying, using the orientation their metadata records.
+    #[arg(long)]
+    auto_rotate: bool,
+    /// Ask a local vision model to read dates printed in the pictures themselves.
+    #[arg(long)]
+    vision: bool,
+    /// Address of the local model runner.
+    #[arg(long, default_value = eonsort_core::ai::DEFAULT_ENDPOINT)]
+    model_endpoint: String,
+    /// Name of the local vision model to use.
+    #[arg(long, default_value = eonsort_core::ai::DEFAULT_VISION_MODEL)]
+    vision_model: String,
 }
 
 #[derive(Args)]
 struct CopyArgs {
     #[arg(short, long)]
     plan: PathBuf,
+    /// Root directory to copy into. Required when the plan was scanned without one, and otherwise
+    /// re-points the plan at a different destination.
+    #[arg(short, long)]
+    destination: Option<PathBuf>,
     /// Number of files to copy in parallel.
     #[arg(short, long)]
     jobs: Option<usize>,
@@ -97,6 +117,9 @@ struct ShowArgs {
     /// Emit one JSON object per entry instead of a table.
     #[arg(long)]
     json: bool,
+    /// Only list entries whose date looks wrong.
+    #[arg(long)]
+    suspect: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -120,6 +143,7 @@ impl From<ProviderArg> for Provider {
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 enum StrategyArg {
+    Smart,
     Oldest,
     Priority,
 }
@@ -127,6 +151,7 @@ enum StrategyArg {
 impl From<StrategyArg> for Strategy {
     fn from(value: StrategyArg) -> Self {
         match value {
+            StrategyArg::Smart => Strategy::Smart,
             StrategyArg::Oldest => Strategy::Oldest,
             StrategyArg::Priority => Strategy::Priority,
         }
@@ -142,12 +167,21 @@ fn main() -> Result<()> {
             let (plan_path, _) = run_scan(&args, &cancel)?;
             println!("Plan written to {}", plan_path.display());
         }
-        Command::Copy(args) => run_copy(&args.plan, args.jobs, !args.no_preserve_times, &cancel)?,
+        Command::Copy(args) => {
+            if let Some(destination) = &args.destination {
+                retarget(&args.plan, Some(destination))
+                    .context("could not point the plan at that destination")?;
+            }
+            run_copy(&args.plan, args.jobs, !args.no_preserve_times, &cancel)?
+        }
         Command::Verify(args) => {
             let report = run_verify(&args.plan, args.hash, &cancel)?;
             print_verify_report(&report);
         }
         Command::Sort(args) => {
+            if args.scan.destination.is_none() {
+                anyhow::bail!("sort needs --destination; use scan on its own to plan without one");
+            }
             let (plan_path, _) = run_scan(&args.scan, &cancel)?;
             run_copy(&plan_path, args.jobs, true, &cancel)?;
         }
@@ -169,19 +203,34 @@ fn install_cancel_handler() -> Result<Arc<AtomicBool>> {
 }
 
 fn run_scan(args: &ScanArgs, cancel: &AtomicBool) -> Result<(PathBuf, u64)> {
+    let mut providers: Vec<Provider> = args.provider.iter().map(|p| (*p).into()).collect();
+    if args.vision && !providers.contains(&Provider::Vision) {
+        providers.push(Provider::Vision);
+    }
+
     let options = ScanOptions {
         sources: args.source.clone(),
         destination: args.destination.clone(),
         folder_pattern: args.pattern.clone(),
+        ai: AiConfig {
+            enabled: args.vision,
+            endpoint: args.model_endpoint.clone(),
+            vision_model: args.vision_model.clone(),
+            ..AiConfig::default()
+        },
         detect: DetectOptions {
-            providers: args.provider.iter().map(|p| (*p).into()).collect(),
+            providers,
             strategy: args.strategy.into(),
         },
         follow_symlinks: args.follow_symlinks,
+        auto_rotate: args.auto_rotate,
     };
 
     let plan_path = args.plan.clone().unwrap_or_else(|| {
-        PathBuf::from(default_plan_name(&options.sources, &options.destination))
+        PathBuf::from(default_plan_name(
+            &options.sources,
+            options.destination.as_deref(),
+        ))
     });
 
     let bar = spinner("Scanning");
@@ -242,6 +291,12 @@ fn run_copy(
         report.progress.already_present,
         report.progress.failed
     );
+    if report.progress.turned > 0 || report.progress.not_turned > 0 {
+        println!(
+            "Turned upright {}, left as they were {}",
+            report.progress.turned, report.progress.not_turned
+        );
+    }
     for failure in &report.failures {
         eprintln!("  failed: {}", failure.source.display());
     }
@@ -289,21 +344,59 @@ fn print_verify_report(report: &VerifyReport) {
 }
 
 fn show(args: &ShowArgs) -> Result<()> {
-    let plan = read_plan(&args.plan).context("could not read the plan")?;
+    let mut plan = read_plan(&args.plan).context("could not read the plan")?;
+    let applied = overrides::read(&overrides::overrides_path(&args.plan))
+        .context("could not read the date corrections beside the plan")?;
+    overrides::apply(&mut plan, &applied)?;
+    flag_across_folders(&mut plan);
+
     for entry in &plan.entries {
+        let hard: Vec<&Flag> = entry
+            .flags
+            .iter()
+            .filter(|f| f.severity() == Severity::Hard)
+            .collect();
+        if args.suspect && hard.is_empty() {
+            continue;
+        }
+
         if args.json {
             println!("{}", serde_json::to_string(entry)?);
-        } else {
-            println!(
-                "{}  {}  {}  ->  {}",
-                entry.taken,
-                entry.provider.label(),
-                entry.source.display(),
-                entry.destination.display()
-            );
+            continue;
+        }
+
+        println!(
+            "{}  {:<10}  {:<6}  {}  ->  {}",
+            entry.taken,
+            entry.provider.label(),
+            suspect::confidence(&entry.candidates, &entry.flags).label(),
+            entry.source.display(),
+            entry.destination.display()
+        );
+        for flag in hard {
+            println!("      ! {}", flag.describe());
         }
     }
     Ok(())
+}
+
+fn flag_across_folders(plan: &mut Plan) {
+    let facts: Vec<EntryFacts<'_>> = plan
+        .entries
+        .iter()
+        .map(|entry| EntryFacts {
+            source: &entry.source,
+            taken: entry.taken,
+            provider: entry.provider,
+            filesystem: entry.filesystem_time(),
+        })
+        .collect();
+    let extra = suspect::cross_file_flags(&facts);
+    drop(facts);
+
+    for (entry, flags) in plan.entries.iter_mut().zip(extra) {
+        entry.flags.extend(flags);
+    }
 }
 
 fn spinner(prefix: &str) -> ProgressBar {

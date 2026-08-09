@@ -12,9 +12,11 @@ repository = "https://github.com/it-atelier-gn/eonsort"
 [workspace.dependencies]
 eonsort-core = { path = "crates/eonsort-core" }
 anyhow = "1"
+base64 = "0.22"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 filetime = "0.2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
 kamadak-exif = "0.6"
 rayon = "1"
 regex = "1"
@@ -22,6 +24,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
 thiserror = "2"
+turbojpeg = "1.5"
+ureq = { version = "3", default-features = false, features = ["json"] }
 walkdir = "2"
 
 [profile.release]

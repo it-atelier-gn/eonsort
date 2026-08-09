@@ -9,6 +9,16 @@ pub fn detect(meta: &Metadata) -> Option<Detection> {
     resolve(created, modified)
 }
 
+pub fn latest(meta: &Metadata) -> Option<NaiveDateTime> {
+    let created = meta.created().ok().and_then(to_local);
+    let modified = meta.modified().ok().and_then(to_local);
+    match (created, modified) {
+        (Some(c), Some(m)) => Some(c.max(m)),
+        (Some(t), None) | (None, Some(t)) => Some(t),
+        (None, None) => None,
+    }
+}
+
 fn resolve(created: Option<NaiveDateTime>, modified: Option<NaiveDateTime>) -> Option<Detection> {
     let (taken, info) = match (created, modified) {
         (Some(c), Some(m)) if m < c => (m, "modified"),

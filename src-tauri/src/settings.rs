@@ -1,3 +1,4 @@
+use eonsort_core::ai::AiConfig;
 use eonsort_core::model::DEFAULT_FOLDER_PATTERN;
 use eonsort_core::providers::{Provider, Strategy};
 use serde::{Deserialize, Serialize};
@@ -15,10 +16,12 @@ pub struct Settings {
     pub providers: Vec<Provider>,
     pub strategy: Strategy,
     pub follow_symlinks: bool,
+    pub auto_rotate: bool,
     pub jobs: usize,
     pub preserve_times: bool,
     pub compare_hashes: bool,
     pub last_plan: Option<PathBuf>,
+    pub ai: AiConfig,
 }
 
 impl Default for Settings {
@@ -27,13 +30,15 @@ impl Default for Settings {
             sources: Vec::new(),
             destination: None,
             folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
-            providers: Provider::ALL.to_vec(),
-            strategy: Strategy::Oldest,
+            providers: Provider::DEFAULT.to_vec(),
+            strategy: Strategy::default(),
             follow_symlinks: false,
+            auto_rotate: false,
             jobs: eonsort_core::copy::default_concurrency(),
             preserve_times: true,
             compare_hashes: false,
             last_plan: None,
+            ai: AiConfig::default(),
         }
     }
 }
@@ -54,7 +59,6 @@ pub fn save(app: &AppHandle, settings: &Settings) -> Result<(), String> {
     std::fs::write(&path, raw).map_err(|e| e.to_string())
 }
 
-/// Plans live next to the settings so a run can be resumed after a restart.
 pub fn plan_directory(app: &AppHandle) -> Option<PathBuf> {
     let dir = app.path().app_data_dir().ok()?.join("plans");
     std::fs::create_dir_all(&dir).ok()?;

@@ -1,5 +1,5 @@
 use eonsort_core::copy::Outcome;
-use eonsort_core::Plan;
+use eonsort_core::{Overrides, Plan};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -10,12 +10,17 @@ pub struct Session {
     pub plan_path: Option<PathBuf>,
     pub plan: Option<Plan>,
     pub journal: HashMap<PathBuf, Outcome>,
+    pub overrides: Overrides,
+    pub rotations: eonsort_core::overrides::Rotations,
+    pub excluded: std::collections::HashSet<PathBuf>,
     pub busy: Option<String>,
 }
 
 pub struct AppState {
     pub session: Mutex<Session>,
     pub cancel: Arc<AtomicBool>,
+    pub model_cancel: Arc<AtomicBool>,
+    pub downloading: Mutex<Option<String>>,
 }
 
 impl Default for AppState {
@@ -23,12 +28,13 @@ impl Default for AppState {
         Self {
             session: Mutex::new(Session::default()),
             cancel: Arc::new(AtomicBool::new(false)),
+            model_cancel: Arc::new(AtomicBool::new(false)),
+            downloading: Mutex::new(None),
         }
     }
 }
 
 impl AppState {
-    /// Marks a long-running job as started, refusing to launch a second one.
     pub fn begin(&self, job: &str) -> Result<(), String> {
         let mut session = self.session.lock().unwrap();
         if let Some(running) = &session.busy {

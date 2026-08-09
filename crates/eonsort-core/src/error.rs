@@ -38,8 +38,23 @@ pub enum Error {
     #[error("could not find a free destination name for {0}")]
     DestinationExhausted(PathBuf),
 
+    #[error("this plan has no destination folder yet")]
+    NoDestination,
+
     #[error("cancelled")]
     Cancelled,
+
+    #[error("{0} cannot be turned without re-encoding it")]
+    RotationNotLossless(PathBuf),
+
+    #[error("{path}: {message}")]
+    Rotation { path: PathBuf, message: String },
+
+    #[error("the local model is switched off")]
+    AiDisabled,
+
+    #[error("{0}")]
+    Ai(String),
 }
 
 impl Error {

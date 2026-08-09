@@ -1,7 +1,43 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Provider = "filename" | "exif" | "media" | "filesystem";
-export type Strategy = "oldest" | "priority";
+export type Provider = "filename" | "exif" | "media" | "vision" | "filesystem";
+export type Strategy = "smart" | "oldest" | "priority";
+export type Confidence = "high" | "medium" | "low";
+export type ModelApi = "ollama" | "open_ai";
+
+export interface AiConfig {
+  enabled: boolean;
+  endpoint: string;
+  api: ModelApi;
+  vision_model: string;
+  embed_model: string;
+  vision_in_scan: boolean;
+  timeout_seconds: number;
+}
+
+export interface PullProgress {
+  status: string;
+  completed: number;
+  total: number;
+}
+
+export interface ModelStatus {
+  reachable: boolean;
+  models: string[];
+  error: string | null;
+  vision_present: boolean;
+  embed_present: boolean;
+}
+
+export interface ReadingView {
+  taken: string | null;
+  taken_epoch: number | null;
+  confident: boolean;
+  source: string | null;
+  subject: string | null;
+  tags: string[];
+  caption: string | null;
+}
 
 export interface Settings {
   sources: string[];
@@ -10,25 +46,29 @@ export interface Settings {
   providers: Provider[];
   strategy: Strategy;
   follow_symlinks: boolean;
+  auto_rotate: boolean;
   jobs: number;
   preserve_times: boolean;
   compare_hashes: boolean;
   last_plan: string | null;
+  ai: AiConfig;
 }
 
 export interface ScanRequest {
   sources: string[];
-  destination: string;
+  destination: string | null;
   folder_pattern: string;
   providers: Provider[];
   strategy: Strategy;
   follow_symlinks: boolean;
+  ai: AiConfig;
+  auto_rotate: boolean;
 }
 
 export interface PlanSummary {
   plan_path: string;
   sources: string[];
-  destination: string;
+  destination: string | null;
   folder_pattern: string;
   files: number;
   bytes: number;
@@ -46,17 +86,43 @@ export interface FolderNode {
   bytes: number;
 }
 
+export interface CandidateView {
+  provider: Provider;
+  provider_info: string | null;
+  taken: string;
+  taken_epoch: number;
+}
+
+export interface FlagView {
+  kind: string;
+  description: string;
+  hard: boolean;
+}
+
 export interface EntryView {
   source: string;
   destination: string;
   name: string;
   folder: string;
   taken: string;
+  taken_epoch: number;
   provider: Provider;
   provider_info: string | null;
   size: number;
   destination_exists: boolean;
   outcome: string | null;
+  candidates: CandidateView[];
+  flags: FlagView[];
+  confidence: Confidence;
+  override_origin: string | null;
+  orientation: number;
+  rotate: Transform;
+  rotate_by_hand: boolean;
+  rotate_lossless: boolean;
+  reencode: boolean;
+  subject: string | null;
+  tags: string[];
+  caption: string | null;
 }
 
 export interface SkippedView {
@@ -64,8 +130,42 @@ export interface SkippedView {
   reason: string;
 }
 
+export interface SuspectGroup {
+  key: string;
+  kind: string;
+  reason: string;
+  folder: string;
+  files: number;
+  earliest: string;
+  latest: string;
+  sources: string[];
+  destination_folders: string[];
+}
+
+export type DateChoice =
+  | { kind: "candidate"; provider: Provider }
+  | { kind: "manual"; taken: string };
+
+export type Transform =
+  | "none"
+  | "rotate90"
+  | "rotate180"
+  | "rotate270"
+  | "flip_h"
+  | "flip_v"
+  | "transpose"
+  | "transverse";
+
+export interface RotationProbe {
+  lossless: boolean;
+  reason: string | null;
+}
+
 export type Preview =
   | { kind: "image"; mime: string; data: string; bytes: number }
+  | { kind: "video"; mime: string; bytes: number }
+  | { kind: "audio"; mime: string; bytes: number }
+  | { kind: "pdf"; bytes: number }
   | { kind: "text"; head: string; bytes: number; truncated: boolean }
   | { kind: "binary"; bytes: number }
   | { kind: "missing" };
@@ -87,6 +187,8 @@ export interface CopyProgress {
   duplicates: number;
   already_present: number;
   failed: number;
+  turned: number;
+  not_turned: number;
   current: string | null;
 }
 
@@ -128,6 +230,11 @@ export interface VerifyReport {
   issues: VerifyIssue[];
 }
 
+export type Thumbnail =
+  | { kind: "image"; data: string; width: number; height: number }
+  | { kind: "playable"; mime: string }
+  | { kind: "none" };
+
 export const getSettings = () => invoke<Settings>("get_settings");
 export const saveSettings = (settings: Settings) => invoke<void>("save_settings", { settings });
 export const checkFolderPattern = (pattern: string) =>
@@ -139,10 +246,43 @@ export const startCopy = (jobs: number, preserveTimes: boolean) =>
 export const startVerify = (compareHashes: boolean) =>
   invoke<void>("start_verify", { compareHashes });
 export const openPlan = (path: string) => invoke<PlanSummary>("open_plan", { path });
+
+export const setDestination = (destination: string | null) =>
+  invoke<PlanSummary>("set_destination", { destination });
+export const thumbnailFor = (path: string, edge: number, rotate?: Transform) =>
+  invoke<Thumbnail>("thumbnail_for", { path, edge, rotate: rotate ?? null });
 export const listFolders = () => invoke<FolderNode[]>("list_folders");
 export const listEntries = (folder: string) => invoke<EntryView[]>("list_entries", { folder });
+export const listAllEntries = () => invoke<EntryView[]>("list_all_entries");
 export const listSkipped = () => invoke<SkippedView[]>("list_skipped");
+export const listSuspects = () => invoke<SuspectGroup[]>("list_suspects");
+export const setDateOverride = (source: string, choice: DateChoice) =>
+  invoke<EntryView>("set_date_override", { source, choice });
+export const clearDateOverride = (source: string) =>
+  invoke<EntryView>("clear_date_override", { source });
+export const shiftDates = (sources: string[], seconds: number) =>
+  invoke<number>("shift_dates", { sources, seconds });
+export const reproviderCluster = (sources: string[], provider: Provider) =>
+  invoke<number>("reprovider_cluster", { sources, provider });
+export const turnRotation = (source: string, quarterTurns: number) =>
+  invoke<EntryView>("turn_rotation", { source, quarterTurns });
+export const setRotation = (source: string, reencode: boolean) =>
+  invoke<EntryView>("set_rotation", { source, reencode });
+export const clearRotation = (source: string) =>
+  invoke<EntryView>("clear_rotation", { source });
+export const rotateMarked = (sources: string[], quarterTurns: number) =>
+  invoke<number>("rotate_marked", { sources, quarterTurns });
+export const probeRotation = (source: string) =>
+  invoke<RotationProbe>("probe_rotation", { source });
 export const previewFile = (path: string) => invoke<Preview>("preview_file", { path });
+export const checkModel = (config: AiConfig) => invoke<ModelStatus>("check_model", { config });
+export const installModel = (config: AiConfig, model: string) =>
+  invoke<void>("install_model", { config, model });
+export const cancelInstall = () => invoke<void>("cancel_install");
+export const uninstallModel = (config: AiConfig, model: string) =>
+  invoke<void>("uninstall_model", { config, model });
+export const readWithModel = (source: string) =>
+  invoke<ReadingView>("read_with_model", { source });
 
 export function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];

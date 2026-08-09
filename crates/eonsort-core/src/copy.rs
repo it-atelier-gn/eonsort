@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::model::{duplicate_variant, PlanEntry};
-use crate::plan::read_plan;
+use crate::rotate::{self, Written};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -48,6 +48,8 @@ pub struct JournalRecord {
     pub source: PathBuf,
     #[serde(flatten)]
     pub outcome: Outcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written: Option<Written>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -60,6 +62,8 @@ pub struct CopyProgress {
     pub duplicates: u64,
     pub already_present: u64,
     pub failed: u64,
+    pub turned: u64,
+    pub not_turned: u64,
     pub current: Option<PathBuf>,
 }
 
@@ -92,19 +96,48 @@ pub fn read_journal(path: &Path) -> Result<HashMap<PathBuf, Outcome>> {
     Ok(done)
 }
 
-/// Copies every planned file. Already-journalled sources are skipped, so an
-/// interrupted run continues where it stopped.
+pub fn read_written(path: &Path) -> Result<HashMap<PathBuf, Written>> {
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(e) => return Err(Error::io(path, e)),
+    };
+    let mut written = HashMap::new();
+    for line in BufReader::new(file).lines() {
+        let line = line.map_err(|e| Error::io(path, e))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(record) = serde_json::from_str::<JournalRecord>(&line) {
+            match record.written {
+                Some(value) => {
+                    written.insert(record.source, value);
+                }
+                None => {
+                    written.remove(&record.source);
+                }
+            }
+        }
+    }
+    Ok(written)
+}
+
 pub fn execute(
     plan_path: &Path,
     options: &CopyOptions,
     cancel: &AtomicBool,
     on_progress: &(dyn Fn(CopyProgress) + Sync),
 ) -> Result<CopyReport> {
-    let plan = read_plan(plan_path)?;
+    let plan = crate::overrides::load_plan(plan_path)?;
     let journal_file = journal_path(plan_path);
     let done = read_journal(&journal_file)?;
 
-    let staging = plan.header.destination.join(STAGING_DIR);
+    let staging = plan
+        .header
+        .destination
+        .as_ref()
+        .ok_or(Error::NoDestination)?
+        .join(STAGING_DIR);
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging).map_err(|e| Error::io(&staging, e))?;
 
@@ -131,6 +164,8 @@ pub fn execute(
             matches!(o, Outcome::AlreadyPresent { .. })
         })),
         failed: AtomicU64::new(count_of(&done, |o| matches!(o, Outcome::Failed { .. }))),
+        turned: AtomicU64::new(0),
+        not_turned: AtomicU64::new(0),
         reserved: Mutex::new(HashSet::new()),
         locks: Mutex::new(HashMap::new()),
         journal: Mutex::new(Journal::open(&journal_file)?),
@@ -151,12 +186,15 @@ pub fn execute(
                 if cancel.load(Ordering::Relaxed) {
                     return true;
                 }
-                let outcome = transfer(entry, &staging, options, &state).unwrap_or_else(|e| {
-                    Outcome::Failed {
-                        error: e.to_string(),
-                    }
-                });
-                state.record(entry, outcome, on_progress);
+                let transferred =
+                    transfer(entry, &staging, options, &state).unwrap_or_else(|e| Transferred {
+                        outcome: Outcome::Failed {
+                            error: e.to_string(),
+                        },
+                        written: None,
+                        refused: false,
+                    });
+                state.record(entry, transferred, on_progress);
                 false
             })
             .reduce(|| false, |a, b| a || b)
@@ -188,6 +226,8 @@ struct State {
     duplicates: AtomicU64,
     already_present: AtomicU64,
     failed: AtomicU64,
+    turned: AtomicU64,
+    not_turned: AtomicU64,
     reserved: Mutex<HashSet<PathBuf>>,
     locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
     journal: Mutex<Journal>,
@@ -196,9 +236,6 @@ struct State {
 }
 
 impl State {
-    /// Serialises every worker aiming at the same planned destination, so a
-    /// second copy of identical content sees the first one already on disk
-    /// instead of racing it into a `_dup_1` name.
     fn lock_for(&self, destination: &Path) -> Arc<Mutex<()>> {
         self.locks
             .lock()
@@ -211,9 +248,15 @@ impl State {
     fn record(
         &self,
         entry: &PlanEntry,
-        outcome: Outcome,
+        transferred: Transferred,
         on_progress: &(dyn Fn(CopyProgress) + Sync),
     ) {
+        let Transferred {
+            outcome,
+            written,
+            refused,
+        } = transferred;
+
         match &outcome {
             Outcome::Copied { .. } => &self.copied,
             Outcome::Duplicate { .. } => &self.duplicates,
@@ -222,12 +265,20 @@ impl State {
         }
         .fetch_add(1, Ordering::Relaxed);
 
+        if written.is_some() {
+            self.turned.fetch_add(1, Ordering::Relaxed);
+        }
+        if refused {
+            self.not_turned.fetch_add(1, Ordering::Relaxed);
+        }
+
         self.files_done.fetch_add(1, Ordering::Relaxed);
         self.bytes_done.fetch_add(entry.size, Ordering::Relaxed);
 
         let record = JournalRecord {
             source: entry.source.clone(),
             outcome,
+            written,
         };
         if matches!(record.outcome, Outcome::Failed { .. }) {
             self.failures.lock().unwrap().push(record.clone());
@@ -247,6 +298,8 @@ impl State {
             duplicates: self.duplicates.load(Ordering::Relaxed),
             already_present: self.already_present.load(Ordering::Relaxed),
             failed: self.failed.load(Ordering::Relaxed),
+            turned: self.turned.load(Ordering::Relaxed),
+            not_turned: self.not_turned.load(Ordering::Relaxed),
             current,
         }
     }
@@ -257,12 +310,18 @@ enum Resolution {
     AlreadyPresent { path: PathBuf },
 }
 
+struct Transferred {
+    outcome: Outcome,
+    written: Option<Written>,
+    refused: bool,
+}
+
 fn transfer(
     entry: &PlanEntry,
     staging: &Path,
     options: &CopyOptions,
     state: &State,
-) -> Result<Outcome> {
+) -> Result<Transferred> {
     let source_meta = fs::metadata(&entry.source).map_err(|e| Error::io(&entry.source, e))?;
 
     let parent = entry
@@ -271,27 +330,52 @@ fn transfer(
         .ok_or_else(|| Error::InvalidSourcePath(entry.destination.clone()))?;
     fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
 
-    let name_lock = state.lock_for(&entry.destination);
-    let _guard = name_lock.lock().unwrap();
-
-    let resolution = resolve(entry, source_meta.len(), state)?;
-    let (destination, duplicate) = match resolution {
-        Resolution::AlreadyPresent { path } => {
-            return Ok(Outcome::AlreadyPresent { destination: path })
-        }
-        Resolution::Write { path, duplicate } => (path, duplicate),
-    };
-
     let temp = staging.join(format!(
         "{:016x}.{TEMP_EXTENSION}",
         state.temp_counter.fetch_add(1, Ordering::Relaxed)
     ));
-    fs::copy(&entry.source, &temp).map_err(|e| Error::io(&entry.source, e))?;
-    fs::OpenOptions::new()
-        .write(true)
-        .open(&temp)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| Error::io(&temp, e))?;
+
+    let mut refused = false;
+    let turned = if entry.rotate.is_identity() {
+        None
+    } else {
+        match rotate::write_rotated(&entry.source, &temp, entry.rotate, entry.reencode) {
+            Ok(written) => Some(written),
+            Err(Error::RotationNotLossless(_)) => {
+                refused = true;
+                None
+            }
+            Err(e) => return Err(e),
+        }
+    };
+
+    let name_lock = state.lock_for(&entry.destination);
+    let _guard = name_lock.lock().unwrap();
+
+    let expected_size = turned.as_ref().map_or(source_meta.len(), |w| w.size);
+    let expected_hash = turned.as_ref().map(|w| w.hash.as_str());
+
+    let resolution = resolve(entry, expected_size, expected_hash, state)?;
+    let (destination, duplicate) = match resolution {
+        Resolution::AlreadyPresent { path } => {
+            let _ = fs::remove_file(&temp);
+            return Ok(Transferred {
+                outcome: Outcome::AlreadyPresent { destination: path },
+                written: turned,
+                refused,
+            });
+        }
+        Resolution::Write { path, duplicate } => (path, duplicate),
+    };
+
+    if turned.is_none() {
+        fs::copy(&entry.source, &temp).map_err(|e| Error::io(&entry.source, e))?;
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&temp)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| Error::io(&temp, e))?;
+    }
 
     if options.preserve_times {
         let mtime = filetime::FileTime::from_last_modification_time(&source_meta);
@@ -301,15 +385,24 @@ fn transfer(
 
     fs::rename(&temp, &destination).map_err(|e| Error::io(&destination, e))?;
 
-    Ok(if duplicate {
-        Outcome::Duplicate { destination }
-    } else {
-        Outcome::Copied { destination }
+    Ok(Transferred {
+        outcome: if duplicate {
+            Outcome::Duplicate { destination }
+        } else {
+            Outcome::Copied { destination }
+        },
+        written: turned,
+        refused,
     })
 }
 
-fn resolve(entry: &PlanEntry, source_size: u64, state: &State) -> Result<Resolution> {
-    let mut source_hash: Option<blake3::Hash> = None;
+fn resolve(
+    entry: &PlanEntry,
+    expected_size: u64,
+    expected_hash: Option<&str>,
+    state: &State,
+) -> Result<Resolution> {
+    let mut known: Option<String> = expected_hash.map(str::to_string);
 
     for index in 0..MAX_DUPLICATE_ATTEMPTS {
         let candidate = if index == 0 {
@@ -336,12 +429,12 @@ fn resolve(entry: &PlanEntry, source_size: u64, state: &State) -> Result<Resolut
             });
         };
 
-        if meta.len() != source_size {
+        if meta.len() != expected_size {
             continue;
         }
-        let expected = match &source_hash {
-            Some(hash) => *hash,
-            None => *source_hash.insert(hash_file(&entry.source)?),
+        let expected = match &known {
+            Some(hash) => hash.clone(),
+            None => known.insert(hash_file(&entry.source)?).clone(),
         };
         if hash_file(&candidate)? == expected {
             return Ok(Resolution::AlreadyPresent { path: candidate });
@@ -351,11 +444,11 @@ fn resolve(entry: &PlanEntry, source_size: u64, state: &State) -> Result<Resolut
     Err(Error::DestinationExhausted(entry.destination.clone()))
 }
 
-fn hash_file(path: &Path) -> Result<blake3::Hash> {
+fn hash_file(path: &Path) -> Result<String> {
     let file = File::open(path).map_err(|e| Error::io(path, e))?;
     let mut hasher = blake3::Hasher::new();
     hasher.update_reader(file).map_err(|e| Error::io(path, e))?;
-    Ok(hasher.finalize())
+    Ok(hasher.finalize().to_hex().to_string())
 }
 
 struct Journal {
@@ -419,10 +512,34 @@ mod tests {
             let plan = dir.path().join("plan.jsonl");
             let options = ScanOptions {
                 sources: vec![src],
-                destination: dir.path().join("out"),
+                destination: Some(dir.path().join("out")),
                 folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
                 detect: DetectOptions::default(),
                 follow_symlinks: false,
+                ai: Default::default(),
+                auto_rotate: false,
+            };
+            scan(&plan, &options, &AtomicBool::new(false), &|_| {}).unwrap();
+            Self { dir, plan }
+        }
+
+        fn turning(files: &[(&str, &[u8])]) -> Self {
+            let dir = tempdir().unwrap();
+            let src = dir.path().join("src");
+            fs::create_dir_all(&src).unwrap();
+            for (name, body) in files {
+                fs::write(src.join(name), body).unwrap();
+            }
+
+            let plan = dir.path().join("plan.jsonl");
+            let options = ScanOptions {
+                sources: vec![src],
+                destination: Some(dir.path().join("out")),
+                folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
+                detect: DetectOptions::default(),
+                follow_symlinks: false,
+                ai: Default::default(),
+                auto_rotate: true,
             };
             scan(&plan, &options, &AtomicBool::new(false), &|_| {}).unwrap();
             Self { dir, plan }
@@ -430,6 +547,17 @@ mod tests {
 
         fn out(&self, relative: &str) -> PathBuf {
             self.dir.path().join("out").join(relative)
+        }
+
+        fn landed(&self) -> Vec<PathBuf> {
+            let mut found: Vec<PathBuf> = walkdir::WalkDir::new(self.dir.path().join("out"))
+                .into_iter()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.file_type().is_file())
+                .map(|entry| entry.into_path())
+                .collect();
+            found.sort();
+            found
         }
 
         fn run(&self) -> CopyReport {
@@ -441,6 +569,118 @@ mod tests {
             )
             .unwrap()
         }
+    }
+
+    #[test]
+    fn turns_a_sideways_picture_and_records_what_it_wrote() {
+        let sideways = crate::exif_write::jpeg_with_exif(64, 32, 6);
+        let fixture = Fixture::turning(&[("IMG_20030101_000012.jpg", &sideways)]);
+
+        let report = fixture.run();
+
+        assert_eq!(report.progress.copied, 1);
+        assert_eq!(report.progress.turned, 1);
+        assert_eq!(report.progress.not_turned, 0);
+
+        let landed = fixture.landed().pop().unwrap();
+        assert_eq!(crate::rotate::read_orientation(&landed), 1);
+
+        let bytes = fs::read(&landed).unwrap();
+        let decoded =
+            image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (32, 64));
+
+        let written = read_written(&journal_path(&fixture.plan)).unwrap();
+        let record = written
+            .get(&fixture.dir.path().join("src/IMG_20030101_000012.jpg"))
+            .unwrap();
+        assert_eq!(record.size, bytes.len() as u64);
+        assert_eq!(record.hash, blake3::hash(&bytes).to_hex().to_string());
+    }
+
+    #[test]
+    fn copying_a_turned_picture_again_recognises_it_rather_than_duplicating_it() {
+        let sideways = crate::exif_write::jpeg_with_exif(64, 32, 6);
+        let fixture = Fixture::turning(&[("IMG_20030101_000012.jpg", &sideways)]);
+
+        fixture.run();
+        fs::remove_file(journal_path(&fixture.plan)).unwrap();
+        let second = fixture.run();
+
+        assert_eq!(second.progress.already_present, 1);
+        assert_eq!(second.progress.copied, 0);
+        assert_eq!(fixture.landed().len(), 1);
+    }
+
+    #[test]
+    fn a_picture_that_cannot_be_turned_losslessly_is_copied_as_it_is() {
+        let ragged = crate::exif_write::jpeg_with_exif(99, 49, 6);
+        let fixture = Fixture::turning(&[("IMG_20030101_000012.jpg", &ragged)]);
+
+        let report = fixture.run();
+
+        assert_eq!(report.progress.copied, 1);
+        assert_eq!(report.progress.turned, 0);
+        assert_eq!(report.progress.not_turned, 1);
+
+        let landed = fixture.landed().pop().unwrap();
+        assert_eq!(fs::read(&landed).unwrap(), ragged);
+        assert_eq!(crate::rotate::read_orientation(&landed), 6);
+    }
+
+    #[test]
+    fn an_upright_picture_is_left_completely_alone() {
+        let upright = crate::exif_write::jpeg_with_exif(64, 32, 1);
+        let fixture = Fixture::turning(&[("IMG_20030101_000012.jpg", &upright)]);
+
+        let report = fixture.run();
+
+        assert_eq!(report.progress.turned, 0);
+        assert_eq!(report.progress.not_turned, 0);
+        assert_eq!(fs::read(fixture.landed().pop().unwrap()).unwrap(), upright);
+        assert!(read_written(&journal_path(&fixture.plan))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn copies_to_the_folder_the_user_corrected_the_date_to() {
+        let fixture = Fixture::new(&[("IMG_20030101_000012.jpg", b"alpha")]);
+        let source = fixture
+            .dir
+            .path()
+            .join("src")
+            .join("IMG_20030101_000012.jpg");
+
+        let mut corrections = crate::overrides::Overrides::default();
+        corrections.set(
+            source,
+            crate::overrides::DateOverride {
+                taken: chrono::NaiveDate::from_ymd_opt(2019, 7, 4)
+                    .unwrap()
+                    .and_hms_opt(18, 30, 0)
+                    .unwrap(),
+                origin: crate::overrides::OverrideOrigin::Manual,
+                at: chrono::NaiveDate::from_ymd_opt(2026, 8, 6)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            },
+        );
+        crate::overrides::write(
+            &crate::overrides::overrides_path(&fixture.plan),
+            &corrections,
+        )
+        .unwrap();
+
+        let report = fixture.run();
+
+        assert_eq!(report.progress.copied, 1);
+        assert!(!fixture.out("2003/01/IMG_20030101_000012.jpg").exists());
+        assert_eq!(
+            fs::read(fixture.out("2019/07/IMG_20030101_000012.jpg")).unwrap(),
+            b"alpha"
+        );
     }
 
     #[test]

@@ -5,26 +5,40 @@
   import {
     cancelJob,
     checkFolderPattern,
+    clearDateOverride,
+    clearRotation,
     formatBytes,
     getSettings,
+    listAllEntries,
     listEntries,
     listFolders,
     listSkipped,
+    listSuspects,
     openPlan,
     previewFile,
+    reproviderCluster,
+    rotateMarked,
     saveSettings,
+    setDateOverride,
+    setRotation,
+    shiftDates,
+    turnRotation,
     startCopy,
+    setDestination,
     startScan,
     startVerify,
     type CopyProgress,
     type CopyReport,
+    type DateChoice,
     type EntryView,
     type FolderNode,
     type PlanSummary,
     type Preview,
+    type Provider,
     type ScanProgress,
     type Settings,
     type SkippedView,
+    type SuspectGroup,
     type VerifyProgress,
     type VerifyReport,
   } from "$lib/api";
@@ -33,6 +47,10 @@
   import TreeItem from "$lib/components/TreeItem.svelte";
   import FileList from "$lib/components/FileList.svelte";
   import PreviewPane from "$lib/components/PreviewPane.svelte";
+  import DateFixPanel from "$lib/components/DateFixPanel.svelte";
+  import TimeScape from "$lib/components/TimeScape.svelte";
+  import ChartsPanel from "$lib/components/ChartsPanel.svelte";
+  import GalleryView from "$lib/components/GalleryView.svelte";
 
   type Job = "scan" | "copy" | "verify";
 
@@ -43,8 +61,14 @@
   let selectedFolder = $state<string | null>(null);
   let entries = $state<EntryView[]>([]);
   let selectedEntry = $state<EntryView | null>(null);
+  let marked = $state<string[]>([]);
   let preview = $state<Preview | null>(null);
   let previewLoading = $state(false);
+  let suspects = $state<SuspectGroup[]>([]);
+  let fixing = $state(false);
+  let view = $state<"folders" | "timeline" | "charts" | "gallery">("folders");
+  let timelineEntries = $state<EntryView[]>([]);
+  let loadingAll = $state(false);
 
   let job = $state<Job | null>(null);
   let scanProgress = $state<ScanProgress | null>(null);
@@ -65,14 +89,28 @@
     !busy &&
       settings !== null &&
       settings.sources.length > 0 &&
-      !!settings.destination &&
       settings.providers.length > 0 &&
       patternError === null,
   );
-  const canRun = $derived(!busy && summary !== null && summary.files > 0);
-  const issueCount = $derived(
-    skipped.length + copyFailures.length + (verifyReport?.issues.length ?? 0),
+  const canRun = $derived(
+    !busy && summary !== null && summary.files > 0 && summary.destination !== null,
   );
+  const runHint = $derived(
+    summary !== null && summary.destination === null
+      ? "Choose a destination folder first"
+      : undefined,
+  );
+  const suspectCount = $derived(suspects.reduce((total, group) => total + group.files, 0));
+  const issueCount = $derived(
+    skipped.length + copyFailures.length + (verifyReport?.issues.length ?? 0) + suspects.length,
+  );
+  const markedEntries = $derived(entries.filter((entry) => marked.includes(entry.source)));
+  const modelReady = $derived(settings?.ai.enabled === true);
+
+  function scanProviders(current: Settings): Provider[] {
+    if (current.ai.enabled && current.ai.vision_in_scan) return current.providers;
+    return current.providers.filter((provider) => provider !== "vision");
+  }
 
   let unlisteners: UnlistenFn[] = [];
 
@@ -130,6 +168,7 @@
   }
 
   async function updateSettings(next: Settings) {
+    const retarget = summary !== null && next.destination !== summary.destination;
     settings = next;
     try {
       await checkFolderPattern(next.folder_pattern);
@@ -138,16 +177,31 @@
       patternError = String(e);
     }
     await saveSettings(next);
+
+    if (retarget) {
+      try {
+        summary = await setDestination(next.destination);
+        await refreshTree(false);
+        notice = next.destination
+          ? `The plan now copies into ${next.destination}.`
+          : "The plan has no destination folder.";
+      } catch (e) {
+        error = String(e);
+      }
+    }
   }
 
   async function refreshTree(reset: boolean) {
+    timelineEntries = [];
     folders = await listFolders();
     skipped = await listSkipped();
+    suspects = await listSuspects();
     if (reset) {
       expanded = new Set(buildTree(folders).map((node) => node.path));
       selectedFolder = null;
       entries = [];
       selectedEntry = null;
+      marked = [];
       preview = null;
     } else if (selectedFolder !== null) {
       entries = await listEntries(selectedFolder);
@@ -158,7 +212,189 @@
     selectedFolder = key;
     entries = await listEntries(key);
     selectedEntry = null;
+    marked = [];
     preview = null;
+  }
+
+  async function showAll(next: "timeline" | "charts" | "gallery") {
+    view = next;
+    if (timelineEntries.length > 0) return;
+    loadingAll = true;
+    try {
+      timelineEntries = await listAllEntries();
+    } finally {
+      loadingAll = false;
+    }
+  }
+
+  async function afterFix(message: string) {
+    folders = await listFolders();
+    suspects = await listSuspects();
+
+    if (selectedFolder !== null) {
+      entries = await listEntries(selectedFolder);
+      marked = marked.filter((source) => entries.some((entry) => entry.source === source));
+    }
+    if (view !== "folders") {
+      timelineEntries = await listAllEntries();
+      loadingAll = false;
+    }
+
+    const pool = view === "folders" ? entries : timelineEntries;
+    selectedEntry = pool.find((entry) => entry.source === selectedEntry?.source) ?? null;
+
+    if (summary) {
+      summary = { ...summary, folders: folders.length };
+    }
+    notice = message;
+    error = null;
+  }
+
+  async function fix<T>(action: () => Promise<T>, describe: (result: T) => string) {
+    if (fixing) return;
+    fixing = true;
+    try {
+      const result = await action();
+      await afterFix(describe(result));
+    } catch (e) {
+      error = String(e);
+    } finally {
+      fixing = false;
+    }
+  }
+
+  const chooseDate = (choice: DateChoice) => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return fix(
+      () => setDateOverride(source, choice),
+      (entry) => `Moved into ${entry.folder || "the destination root"}.`,
+    );
+  };
+
+  const revertDate = () => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return fix(
+      () => clearDateOverride(source),
+      (entry) => `Back to the detected date, ${entry.taken}.`,
+    );
+  };
+
+  function patchEntry(updated: EntryView) {
+    const swap = (list: EntryView[]) =>
+      list.map((entry) => (entry.source === updated.source ? updated : entry));
+    entries = swap(entries);
+    timelineEntries = swap(timelineEntries);
+    selectedEntry = updated;
+  }
+
+  async function turnSelected<T extends EntryView>(action: () => Promise<T>, message: string) {
+    if (fixing) return;
+    fixing = true;
+    try {
+      patchEntry(await action());
+      notice = message;
+      error = null;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      fixing = false;
+    }
+  }
+
+  const turnEntry = (quarterTurns: number) => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return turnSelected(() => turnRotation(source, quarterTurns), "Turned.");
+  };
+
+  const resetTurn = () => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return turnSelected(() => clearRotation(source), "Back to the detected orientation.");
+  };
+
+  const allowReencode = () => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return turnSelected(
+      () => setRotation(source, true),
+      "This one will be re-encoded when it is copied.",
+    );
+  };
+
+  const rotateMarkedFiles = (sources: string[], quarterTurns: number) =>
+    fix(
+      () => rotateMarked(sources, quarterTurns),
+      (count) => `Turned ${count} ${count === 1 ? "file" : "files"}.`,
+    );
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (view === "gallery" || busy || fixing) return;
+    const target = event.target as HTMLElement | null;
+    if (
+      target &&
+      (target.isContentEditable ||
+        ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName))
+    ) {
+      return;
+    }
+    if (!selectedEntry || selectedEntry.orientation === 0) return;
+
+    switch (event.key) {
+      case "[":
+        event.preventDefault();
+        turnEntry(-1);
+        break;
+      case "]":
+        event.preventDefault();
+        turnEntry(1);
+        break;
+      case "\\":
+        event.preventDefault();
+        turnEntry(2);
+        break;
+      case "0":
+        event.preventDefault();
+        resetTurn();
+        break;
+    }
+  }
+
+  const shiftMarked = (sources: string[], seconds: number) =>
+    fix(
+      () => shiftDates(sources, seconds),
+      (count) => `Shifted ${count} ${count === 1 ? "file" : "files"}.`,
+    );
+
+  const reproviderMarked = (sources: string[], provider: Provider) =>
+    fix(
+      () => reproviderCluster(sources, provider),
+      (count) => `Re-dated ${count} ${count === 1 ? "file" : "files"} from ${provider}.`,
+    );
+
+  async function selectSuspects(group: SuspectGroup) {
+    const folder = group.destination_folders[0] ?? "";
+    if (folder !== selectedFolder) {
+      await selectFolder(folder);
+      expanded = new Set([...expanded, ...ancestors(folder)]);
+    }
+
+    marked = group.sources.filter((source) => entries.some((entry) => entry.source === source));
+    selectedEntry = entries.find((entry) => entry.source === marked[0]) ?? null;
+    if (selectedEntry) await selectEntry(selectedEntry);
+
+    issuesOpen = false;
+    if (group.destination_folders.length > 1) {
+      notice = `Showing the ${marked.length} of ${group.files} that land in ${folder || "the destination root"}.`;
+    }
+  }
+
+  function ancestors(folder: string): string[] {
+    const parts = folder.split("/").filter(Boolean);
+    return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
   }
 
   function toggleFolder(path: string) {
@@ -199,11 +435,13 @@
       copyProgress = null;
       await startScan({
         sources: settings!.sources,
-        destination: settings!.destination!,
+        destination: settings!.destination,
         folder_pattern: settings!.folder_pattern,
-        providers: settings!.providers,
+        providers: scanProviders(settings!),
         strategy: settings!.strategy,
         follow_symlinks: settings!.follow_symlinks,
+        ai: settings!.ai,
+        auto_rotate: settings!.auto_rotate,
       });
     });
 
@@ -227,6 +465,8 @@
   }
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 <div class="app">
   <header>
     <div class="brand">
@@ -234,8 +474,11 @@
       <div>
         <h1>Eonsort</h1>
         {#if summary}
-          <p class="faint truncate" title={summary.destination}>
-            {summary.files} files · {formatBytes(summary.bytes)} · into {summary.destination}
+          <p class="faint truncate" title={summary.destination ?? "No destination chosen yet"}>
+            {summary.files} files · {formatBytes(summary.bytes)} ·
+            {summary.destination
+              ? `into ${summary.destination}`
+              : "no destination yet — pick one to copy"}
           </p>
         {:else}
           <p class="faint">Pick your folders, scan, review, then copy.</p>
@@ -244,9 +487,17 @@
     </div>
 
     <div class="actions">
+      <div class="views">
+        <button class:active={view === "folders"} onclick={() => (view = "folders")}>Folders</button>
+        <button class:active={view === "timeline"} onclick={() => showAll("timeline")}>
+          Timeline
+        </button>
+        <button class:active={view === "charts"} onclick={() => showAll("charts")}>Charts</button>
+        <button class:active={view === "gallery"} onclick={() => showAll("gallery")}>Gallery</button>
+      </div>
       <button class="primary" onclick={scan} disabled={!canScan}>Scan</button>
-      <button onclick={copy} disabled={!canRun}>Copy files</button>
-      <button onclick={check} disabled={!canRun}>Check result</button>
+      <button onclick={copy} disabled={!canRun} title={runHint}>Copy files</button>
+      <button onclick={check} disabled={!canRun} title={runHint}>Check result</button>
       {#if busy}
         <button class="danger" onclick={() => cancelJob()}>Stop</button>
       {/if}
@@ -254,40 +505,73 @@
   </header>
 
   {#if settings}
-    <main>
+    <main class:wide={view !== "folders"}>
       <SetupPanel {settings} {busy} {patternError} onChange={updateSettings} />
 
-      <div class="tree scroll" role="tree" aria-label="Planned folders">
-        {#each tree as node (node.path)}
-          <TreeItem
-            {node}
-            depth={0}
-            selected={selectedFolder}
-            {expanded}
-            onSelect={selectFolder}
-            onToggle={toggleFolder}
-          />
-        {:else}
-          <p class="placeholder faint">Nothing planned yet. Run a scan to see the preview.</p>
-        {/each}
-      </div>
+      {#if loadingAll}
+        <div class="loading faint">
+          <span class="spinner"></span>
+          Reading {summary ? summary.files.toLocaleString() : ""} files out of the plan…
+        </div>
+      {:else if view === "charts"}
+        <ChartsPanel entries={timelineEntries} />
+      {:else if view === "gallery"}
+        <GalleryView entries={timelineEntries} onSelect={selectEntry} />
+      {:else if view === "timeline"}
+        <TimeScape entries={timelineEntries} selected={selectedEntry} onSelect={selectEntry} />
+      {:else}
+        <div class="tree scroll" role="tree" aria-label="Planned folders">
+          {#each tree as node (node.path)}
+            <TreeItem
+              {node}
+              depth={0}
+              selected={selectedFolder}
+              {expanded}
+              onSelect={selectFolder}
+              onToggle={toggleFolder}
+            />
+          {:else}
+            <p class="placeholder faint">Nothing planned yet. Run a scan to see the preview.</p>
+          {/each}
+        </div>
 
-      <FileList
-        {entries}
-        folder={selectedFolder}
-        selected={selectedEntry}
-        onSelect={selectEntry}
-        onOpen={(entry) => openInSystem(entry.source)}
-      />
+        <FileList
+          {entries}
+          folder={selectedFolder}
+          selected={selectedEntry}
+          {marked}
+          onSelect={selectEntry}
+          onMark={(sources) => (marked = sources)}
+          onOpen={(entry) => openInSystem(entry.source)}
+        />
+      {/if}
 
       <PreviewPane
         entry={selectedEntry}
         {preview}
         loading={previewLoading}
+        busy={fixing || busy}
+        {modelReady}
         onOpen={openInSystem}
         onReveal={reveal}
+        onChoose={chooseDate}
+        onRevert={revertDate}
+        onTurn={turnEntry}
+        onResetTurn={resetTurn}
+        onReencode={allowReencode}
       />
     </main>
+  {/if}
+
+  {#if markedEntries.length > 1 && view === "folders"}
+    <DateFixPanel
+      entries={markedEntries}
+      busy={fixing || busy}
+      onShift={shiftMarked}
+      onReprovider={reproviderMarked}
+      onRotate={rotateMarkedFiles}
+      onClear={() => (marked = [])}
+    />
   {/if}
 
   {#if issuesOpen}
@@ -296,6 +580,14 @@
         <strong>Issues</strong>
         <button class="ghost" onclick={() => (issuesOpen = false)}>Close</button>
       </div>
+      {#each suspects as group (group.key)}
+        <button class="suspect" onclick={() => selectSuspects(group)}>
+          <span class="badge danger">{group.files} dates look wrong</span>
+          <span class="reason">Each one {group.reason}.</span>
+          <span class="mono faint truncate">{group.folder}</span>
+          <span class="mono faint">{group.earliest} → {group.latest}</span>
+        </button>
+      {/each}
       {#each copyFailures as failure (failure.source)}
         <p><span class="badge danger">copy failed</span> <span class="mono">{failure.source}</span></p>
       {/each}
@@ -350,6 +642,12 @@
       </div>
     {/if}
 
+    {#if suspectCount > 0}
+      <button class="ghost warn-text" onclick={() => (issuesOpen = true)}>
+        {suspectCount} suspicious {suspectCount === 1 ? "date" : "dates"}
+      </button>
+    {/if}
+
     <button class="ghost" onclick={() => (issuesOpen = !issuesOpen)}>
       Issues {issueCount > 0 ? `(${issueCount})` : ""}
     </button>
@@ -359,7 +657,7 @@
 <style>
   .app {
     display: grid;
-    grid-template-rows: auto 1fr auto auto;
+    grid-template-rows: auto 1fr auto auto auto;
     height: 100vh;
   }
 
@@ -408,6 +706,46 @@
     min-height: 0;
   }
 
+  main.wide {
+    grid-template-columns: 300px minmax(0, 1fr) 340px;
+  }
+
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 12px;
+    background: var(--bg-panel);
+  }
+
+  .spinner {
+    width: 13px;
+    height: 13px;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .views {
+    display: flex;
+    gap: 2px;
+    margin-right: 6px;
+  }
+
+  .views button.active {
+    border-color: var(--accent);
+    background: var(--bg-active);
+    color: var(--text);
+  }
+
   .tree {
     background: var(--bg-panel);
     border-right: 1px solid var(--border);
@@ -446,6 +784,34 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .suspect {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 5px 8px;
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+
+  .suspect:hover {
+    border-color: var(--danger);
+  }
+
+  .suspect .reason {
+    color: var(--text);
+  }
+
+  .suspect .faint {
+    font-size: 11px;
+  }
+
+  .warn-text {
+    color: var(--warn);
   }
 
   footer {

@@ -1,10 +1,12 @@
+use crate::ai::{AiConfig, Client};
 use crate::error::{Error, Result};
 use crate::model::{
-    destination_for, validate_folder_pattern, PlanEntry, PlanHeader, PlanRecord, SkippedEntry,
-    PLAN_VERSION,
+    destination_root, destination_with_subject, validate_folder_pattern, PlanEntry, PlanHeader,
+    PlanRecord, SkippedEntry, PLAN_VERSION,
 };
 use crate::plan::{read_plan, Plan, PlanWriter};
-use crate::providers::{detect, DetectOptions};
+use crate::providers::{resolve, DetectOptions};
+use crate::rotate::Transform;
 use chrono::Local;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -19,10 +21,15 @@ const BATCH: usize = 512;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScanOptions {
     pub sources: Vec<PathBuf>,
-    pub destination: PathBuf,
+    #[serde(default)]
+    pub destination: Option<PathBuf>,
     pub folder_pattern: String,
     pub detect: DetectOptions,
     pub follow_symlinks: bool,
+    #[serde(default)]
+    pub ai: AiConfig,
+    #[serde(default)]
+    pub auto_rotate: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,7 +48,6 @@ pub struct ScanProgress {
     pub current: Option<PathBuf>,
 }
 
-/// Builds (or resumes) the plan file describing where every source file would land.
 pub fn scan(
     plan_path: &Path,
     options: &ScanOptions,
@@ -69,6 +75,14 @@ pub fn scan(
         None => PlanWriter::create(plan_path, &header)?,
     };
 
+    let ai = options
+        .detect
+        .providers
+        .iter()
+        .any(|p| p.needs_model())
+        .then(|| Client::new(options.ai.clone()))
+        .filter(|client| client.config().usable());
+
     let (files_total, bytes_total) = count(options, cancel, on_progress)?;
     let mut files_seen = done.len() as u64;
     let mut batch: Vec<(PathBuf, Metadata)> = Vec::with_capacity(BATCH);
@@ -83,7 +97,7 @@ pub fn scan(
         batch.push((path, meta));
 
         if batch.len() >= BATCH {
-            files_seen += flush_batch(&mut batch, options, &mut writer)? as u64;
+            files_seen += flush_batch(&mut batch, options, ai.as_ref(), &mut writer)? as u64;
             on_progress(ScanProgress {
                 phase: ScanPhase::Analysing,
                 files_seen,
@@ -94,7 +108,7 @@ pub fn scan(
         }
     }
 
-    files_seen += flush_batch(&mut batch, options, &mut writer)? as u64;
+    files_seen += flush_batch(&mut batch, options, ai.as_ref(), &mut writer)? as u64;
     writer.flush()?;
     drop(writer);
 
@@ -121,6 +135,7 @@ fn resumable(plan_path: &Path, header: &PlanHeader) -> Option<Plan> {
 fn flush_batch(
     batch: &mut Vec<(PathBuf, Metadata)>,
     options: &ScanOptions,
+    ai: Option<&Client>,
     writer: &mut PlanWriter,
 ) -> Result<usize> {
     if batch.is_empty() {
@@ -128,7 +143,7 @@ fn flush_batch(
     }
     let records: Vec<PlanRecord> = batch
         .par_iter()
-        .map(|(path, meta)| analyse(path, meta, options))
+        .map(|(path, meta)| analyse(path, meta, options, ai))
         .collect();
     let count = records.len();
     for record in &records {
@@ -138,27 +153,53 @@ fn flush_batch(
     Ok(count)
 }
 
-fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions) -> PlanRecord {
-    let Some(found) = detect(path, meta, &options.detect) else {
+fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions, ai: Option<&Client>) -> PlanRecord {
+    let Some(found) = resolve(path, meta, &options.detect, ai) else {
         return PlanRecord::Skipped(SkippedEntry {
             source: path.to_path_buf(),
             reason: "no creation date found".into(),
         });
     };
 
-    match destination_for(
+    let subject = found.reading.as_ref().and_then(|r| r.subject.clone());
+
+    let orientation = if crate::rotate::lossless_extension(path) {
+        crate::rotate::read_orientation(path)
+    } else {
+        0
+    };
+    let rotate = if options.auto_rotate {
+        Transform::for_orientation(orientation)
+    } else {
+        Transform::None
+    };
+
+    match destination_with_subject(
         path,
-        found.taken,
-        &options.destination,
+        found.chosen.taken,
+        subject.as_deref(),
+        destination_root(options.destination.as_deref()),
         &options.folder_pattern,
     ) {
         Ok(destination) => PlanRecord::Entry(PlanEntry {
             source: path.to_path_buf(),
             destination,
-            taken: found.taken,
-            provider: found.provider,
-            provider_info: found.info,
+            taken: found.chosen.taken,
+            provider: found.chosen.provider,
+            provider_info: found.chosen.info,
             size: meta.len(),
+            candidates: found.candidates,
+            flags: found.flags,
+            tags: found
+                .reading
+                .as_ref()
+                .map(|r| r.tags.clone())
+                .unwrap_or_default(),
+            caption: found.reading.as_ref().and_then(|r| r.caption.clone()),
+            subject,
+            orientation,
+            rotate,
+            reencode: false,
         }),
         Err(err) => PlanRecord::Skipped(SkippedEntry {
             source: path.to_path_buf(),
@@ -199,8 +240,10 @@ fn count(
 }
 
 fn walk(options: &ScanOptions) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
-    let destination =
-        std::fs::canonicalize(&options.destination).unwrap_or_else(|_| options.destination.clone());
+    let destination = options
+        .destination
+        .as_ref()
+        .map(|d| std::fs::canonicalize(d).unwrap_or_else(|_| d.clone()));
 
     options.sources.iter().flat_map(move |source| {
         let destination = destination.clone();
@@ -209,9 +252,11 @@ fn walk(options: &ScanOptions) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
             .into_iter()
             .filter_entry(move |e| {
                 !e.file_type().is_dir()
-                    || std::fs::canonicalize(e.path())
-                        .map(|p| p != destination)
-                        .unwrap_or(true)
+                    || destination.as_ref().is_none_or(|destination| {
+                        std::fs::canonicalize(e.path())
+                            .map(|p| &p != destination)
+                            .unwrap_or(true)
+                    })
             })
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
@@ -242,10 +287,12 @@ mod tests {
     fn options(sources: Vec<PathBuf>, destination: PathBuf) -> ScanOptions {
         ScanOptions {
             sources,
-            destination,
+            destination: Some(destination),
             folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
             detect: DetectOptions::default(),
             follow_symlinks: false,
+            ai: Default::default(),
+            auto_rotate: false,
         }
     }
 
@@ -360,6 +407,30 @@ mod tests {
         let plan = scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
         assert!(plan.entries.is_empty());
         assert_eq!(plan.skipped.len(), 1);
+    }
+
+    #[test]
+    fn plans_relative_destinations_when_no_destination_is_chosen() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("IMG_20230506_101112.jpg"), b"one").unwrap();
+
+        let plan_path = dir.path().join("plan.jsonl");
+        let mut opts = options(vec![src], dir.path().join("out"));
+        opts.destination = None;
+
+        let plan = scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
+
+        assert_eq!(plan.header.destination, None);
+        assert_eq!(plan.entries.len(), 1);
+        assert_eq!(
+            plan.entries[0].destination,
+            PathBuf::from("2023")
+                .join("05")
+                .join("IMG_20230506_101112.jpg")
+        );
+        assert!(plan.entries[0].destination.is_relative());
     }
 
     #[test]

@@ -1,5 +1,8 @@
 use crate::error::{Error, Result};
-use crate::model::{PlanEntry, PlanHeader, PlanRecord, SkippedEntry, PLAN_VERSION};
+use crate::model::{
+    destination_root, destination_with_subject, PlanEntry, PlanHeader, PlanRecord, SkippedEntry,
+    PLAN_VERSION,
+};
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -28,15 +31,50 @@ impl Plan {
     }
 }
 
-pub fn default_plan_name(sources: &[PathBuf], destination: &Path) -> String {
+pub fn default_plan_name(sources: &[PathBuf], destination: Option<&Path>) -> String {
     let mut hasher = blake3::Hasher::new();
     for source in sources {
         hasher.update(source.to_string_lossy().as_bytes());
         hasher.update(b"\0");
     }
     hasher.update(b"->");
-    hasher.update(destination.to_string_lossy().as_bytes());
+    hasher.update(destination_root(destination).to_string_lossy().as_bytes());
     format!("plan-{}.jsonl", &hasher.finalize().to_hex()[..8])
+}
+
+pub fn retarget(plan_path: &Path, destination: Option<&Path>) -> Result<Plan> {
+    let mut plan = read_plan(plan_path)?;
+    if plan.header.destination.as_deref() == destination {
+        return Ok(plan);
+    }
+
+    plan.header.destination = destination.map(Path::to_path_buf);
+    let root = plan.header.root().to_path_buf();
+    let pattern = plan.header.folder_pattern.clone();
+    for entry in &mut plan.entries {
+        entry.destination = destination_with_subject(
+            &entry.source,
+            entry.taken,
+            entry.subject.as_deref(),
+            &root,
+            &pattern,
+        )?;
+    }
+
+    let temp = plan_path.with_extension("jsonl.rewrite");
+    let mut writer = PlanWriter::create(&temp, &plan.header)?;
+    for entry in &plan.entries {
+        writer.write(&PlanRecord::Entry(entry.clone()))?;
+    }
+    for skipped in &plan.skipped {
+        writer.write(&PlanRecord::Skipped(skipped.clone()))?;
+    }
+    writer.flush()?;
+    drop(writer);
+    std::fs::rename(&temp, plan_path).map_err(|e| Error::io(plan_path, e))?;
+    let _ = std::fs::remove_file(crate::copy::journal_path(plan_path));
+
+    Ok(plan)
 }
 
 pub fn read_plan(path: &Path) -> Result<Plan> {
@@ -73,8 +111,6 @@ pub fn read_plan(path: &Path) -> Result<Plan> {
     })
 }
 
-/// Append-only writer. Records land on disk as they are produced so an
-/// interrupted scan can be resumed instead of restarted.
 pub struct PlanWriter {
     path: PathBuf,
     file: BufWriter<File>,
@@ -149,7 +185,7 @@ mod tests {
                 .and_hms_opt(0, 0, 0)
                 .unwrap(),
             sources: vec![PathBuf::from("/src")],
-            destination: PathBuf::from("/out"),
+            destination: Some(PathBuf::from("/out")),
             folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
             detect: DetectOptions::default(),
         }
@@ -166,6 +202,7 @@ mod tests {
             provider: Provider::Filename,
             provider_info: Some(name.to_string()),
             size: 10,
+            ..PlanEntry::default()
         }
     }
 
@@ -211,6 +248,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_a_version_1_entry_that_predates_candidates_and_flags() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plan.jsonl");
+        let mut legacy = header();
+        legacy.version = 1;
+        std::fs::write(
+            &path,
+            format!(
+                "{}\n{}\n",
+                serde_json::to_string(&PlanRecord::Header(legacy)).unwrap(),
+                r#"{"kind":"entry","source":"/src/a.jpg","destination":"/out/2023/05/a.jpg","taken":"2023-05-06T00:00:00","provider":"filename","provider_info":"a.jpg","size":10}"#
+            ),
+        )
+        .unwrap();
+
+        let plan = read_plan(&path).unwrap();
+        assert_eq!(plan.entries.len(), 1);
+        assert!(plan.entries[0].candidates.is_empty());
+        assert!(plan.entries[0].flags.is_empty());
+    }
+
+    #[test]
     fn reports_the_line_of_a_malformed_record() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("plan.jsonl");
@@ -245,14 +304,63 @@ mod tests {
     #[test]
     fn plan_names_are_stable_per_source_and_destination() {
         let sources = vec![PathBuf::from("/a"), PathBuf::from("/b")];
-        let dest = Path::new("/out");
+        let dest = Some(Path::new("/out"));
         assert_eq!(
             default_plan_name(&sources, dest),
             default_plan_name(&sources, dest)
         );
         assert_ne!(
             default_plan_name(&sources, dest),
-            default_plan_name(&sources, Path::new("/other"))
+            default_plan_name(&sources, Some(Path::new("/other")))
         );
+        assert_ne!(
+            default_plan_name(&sources, dest),
+            default_plan_name(&sources, None)
+        );
+    }
+
+    #[test]
+    fn retarget_moves_every_entry_under_a_newly_chosen_destination() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plan.jsonl");
+
+        let mut open = header();
+        open.destination = None;
+        let mut writer = PlanWriter::create(&path, &open).unwrap();
+        writer
+            .write(&PlanRecord::Entry(PlanEntry {
+                source: PathBuf::from("/src/a.jpg"),
+                destination: PathBuf::from("2023").join("05").join("a.jpg"),
+                ..entry("a.jpg")
+            }))
+            .unwrap();
+        writer
+            .write(&PlanRecord::Skipped(SkippedEntry {
+                source: PathBuf::from("/src/b.bin"),
+                reason: "no date".into(),
+            }))
+            .unwrap();
+        drop(writer);
+
+        let out = dir.path().join("out");
+        let plan = retarget(&path, Some(&out)).unwrap();
+
+        assert_eq!(plan.header.destination.as_deref(), Some(out.as_path()));
+        assert_eq!(plan.entries[0].destination, out.join("2023/05/a.jpg"));
+        assert_eq!(plan.skipped.len(), 1);
+        assert_eq!(read_plan(&path).unwrap(), plan);
+    }
+
+    #[test]
+    fn retarget_is_a_no_op_when_the_destination_is_unchanged() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plan.jsonl");
+        let mut writer = PlanWriter::create(&path, &header()).unwrap();
+        writer.write(&PlanRecord::Entry(entry("a.jpg"))).unwrap();
+        drop(writer);
+
+        let before = std::fs::read_to_string(&path).unwrap();
+        retarget(&path, Some(Path::new("/out"))).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
     }
 }
