@@ -68,7 +68,7 @@ re-dated.
 
 ## Seeing it rather than reading it
 
-Four visual tabs. In all three walkable ones: click to take the mouse,
+Three visual tabs. In the two walkable ones: click to take the mouse,
 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, <kbd>Shift</kbd> to run, mouse to look,
 <kbd>Esc</kbd> to give the mouse back.
 
@@ -96,80 +96,6 @@ year. Pictures hang at eye height, videos play in frame, daylight falls through 
 Rooms open into one another as one enfilade. Look at a picture for its name and date; click or press
 <kbd>E</kbd> to open it in the preview pane.
 
-### Scene — walking into a single picture
-
-A photograph is a pinhole camera's view of a space, so the space can be read back out. Mark the
-point where the picture recedes and the rectangle of the furthest wall, and eonsort projects the
-picture onto a five-sided box: back wall, floor, ceiling, two side walls.
-
-The first fit is a guess. Drag the yellow cross onto the vanishing point and the four blue corners
-onto the far wall; the room rebuilds as you drag, with dashed guides to line up against anything
-receding in the photograph.
-
-| Control | What it does |
-|---|---|
-| **lens** | How wide the taking lens was |
-| **Reset** | Back to the guess, forgetting the saved fit |
-| **Flat** | Collapse to a picture wall with a floor — the honest answer for a portrait or close-up |
-| **Ask the model** | The local model fills in the handles; a starting point only, since vision models read bounding boxes well and vanishing points badly |
-| **Walk in** | Take the mouse. Before you move, the view is the photograph itself. |
-
-Room size follows from the photographer's eye being 1.7 m above the floor, so walking speed and head
-height need no tuning. The plaque gives depth, width and height, and says so if the fit is barely
-walkable. Fits are remembered per picture in `*.scenes.json` beside the plan.
-
-Objects the model finds on the visible floor can be shown as **cut-outs** — pieces of the photograph
-standing up with a contact shadow. Off by default: without a cut-out mask the subject also stays
-painted on the floor and wall behind it, so you see it twice.
-
-#### Real depth, optionally
-
-With the optional `depth` feature, **Read depth** runs
-[Depth Anything V2](https://depth-anything-v2.github.io/) locally and turns the photograph into a
-displaced mesh, so a face stands out from the wall behind it. The **relief** slider fades between
-the flat box and full displacement. Depth is *relative*, not metric — it says what is nearer, not
-how far.
-
-At a foreground edge the mesh has nothing behind it, so those triangles are dropped. **fill**
-decides what shows through the gap:
-
-| fill | What happens |
-|---|---|
-| `nearest` | Carries the background a short way behind each near edge, colour and distance both, as a second layer. No model, no network, instant. |
-| `service` | Sends the carried band to an endpoint speaking OpenAI's `/v1/images/edits`. Press **Fill**. |
-| `local` | Same band, painted in process by Stable Diffusion 1.5 inpainting. Needs the `diffuse` feature. |
-| `none` | Leaves the gap open. |
-
-`service` remembers four settings between sessions: **endpoint** (a bare host gains
-`/v1/images/edits`; Automatic1111's reply shape is understood too), **key** (empty for a local
-server), **model** and **size**. `local` takes only a **prompt**. Both receive the picture with the
-torn band cut out as transparency.
-
-Both painters supply *colour only* — distances stay the propagated background, so a painted patch
-never invents geometry. Step far enough sideways and the flat room shows through anyway.
-
-Neither feature is in the default build:
-
-```sh
-cargo tauri build --features depth              # depth mesh + nearest/service fill
-cargo tauri build --features "depth diffuse"    # adds the local painter
-```
-
-Weights download on first use into `models/` in the app data folder — delete it to reclaim the
-space — from pinned revisions of [`lmz/candle-dino-v2`](https://huggingface.co/lmz/candle-dino-v2),
-[`jeroenvlek/depth-anything-v2-safetensors`](https://huggingface.co/jeroenvlek/depth-anything-v2-safetensors),
-[`stable-diffusion-v1-5/stable-diffusion-inpainting`](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-inpainting)
-and [`openai/clip-vit-base-patch32`](https://huggingface.co/openai/clip-vit-base-patch32).
-
-| | Download | CPU cost |
-|---|---|---|
-| depth | ~190 MB | a second or two per picture |
-| diffuse | ~2.1 GB | **minutes** per hole, at 20 steps and 512×512 |
-
-Impatient machines should use `nearest`, or point `service` at something with a GPU. A build without
-a feature says so instead of offering a button that cannot work. The `service` fill needs neither
-feature nor weights — only a reachable endpoint.
-
 ### Charts
 
 The same questions in flat 2D, often quicker to read:
@@ -186,7 +112,7 @@ The first figure is also the way in. Click a square to drop into it, drag for a 
 row label for a whole year; the grid refines from years to months to days to hours.
 
 Whatever you pick scopes the whole app: every figure recounts itself, and Timeline, Gallery and
-Scene show only those files. A bar under the toolbar tracks where you are — `All time › 2019 › Mar
+Gallery show only those files. A bar under the toolbar tracks where you are — `All time › 2019 › Mar
 2019` — each step clickable, plus **Back** and **Show all**. Scanning again clears it.
 
 ## Turning pictures upright
@@ -298,15 +224,12 @@ Contributions are welcome. For substantial changes, open an issue first.
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && npm run check && npm test
 ```
 
-The optional features are not in that line; CI checks them in separate non-blocking jobs. If you
-touch `depth.rs` or `diffuse.rs`:
+The optional `upright` feature is not in that line; CI checks it in a separate non-blocking job. If
+you touch `upright.rs` or `yolo.rs`:
 
 ```sh
-cargo clippy -p eonsort-core --features depth --all-targets -- -D warnings && cargo test -p eonsort-core --features depth
-cargo clippy -p eonsort-core --features diffuse --all-targets -- -D warnings && cargo test -p eonsort-core --features diffuse
+cargo clippy -p eonsort-core --features upright --all-targets -- -D warnings && cargo test -p eonsort-core --features upright
 ```
-
-`inpaint.rs` — the `service` fill — needs no feature and is covered by the default line.
 
 The application icon is generated. To change it, edit `scripts/make-icon.mjs` and run `npm run icon`.
 

@@ -11,9 +11,7 @@ repository.workspace = true
 default = []
 download = ["ureq/rustls"]
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
-depth = ["candle", "download"]
 upright = ["candle", "download"]
-diffuse = ["candle", "download", "dep:tokenizers"]
 
 [dependencies]
 base64.workspace = true
@@ -30,7 +28,6 @@ regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokenizers = { workspace = true, optional = true }
 turbojpeg.workspace = true
 ureq.workspace = true
 walkdir.workspace = true

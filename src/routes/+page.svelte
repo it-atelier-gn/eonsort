@@ -51,7 +51,6 @@
   import TimeScape from "$lib/components/TimeScape.svelte";
   import ChartsPanel from "$lib/components/ChartsPanel.svelte";
   import GalleryView from "$lib/components/GalleryView.svelte";
-  import SceneView from "$lib/components/SceneView.svelte";
   import ScopeBar from "$lib/components/ScopeBar.svelte";
   import { filterRange, sameRange, type TimeRange } from "$lib/viz/range";
 
@@ -69,7 +68,7 @@
   let previewLoading = $state(false);
   let suspects = $state<SuspectGroup[]>([]);
   let fixing = $state(false);
-  let view = $state<"folders" | "timeline" | "charts" | "gallery" | "scene">("folders");
+  let view = $state<"folders" | "timeline" | "charts" | "gallery">("folders");
   let timelineEntries = $state<EntryView[]>([]);
   let loadingAll = $state(false);
   let scopes = $state<TimeRange[]>([]);
@@ -232,7 +231,7 @@
     preview = null;
   }
 
-  async function showAll(next: "timeline" | "charts" | "gallery" | "scene") {
+  async function showAll(next: "timeline" | "charts" | "gallery") {
     view = next;
     if (timelineEntries.length > 0) return;
     loadingAll = true;
@@ -348,7 +347,7 @@
 
   function onKeydown(event: KeyboardEvent) {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (view === "gallery" || view === "scene" || busy || fixing) return;
+    if (view === "gallery" || busy || fixing) return;
     const target = event.target as HTMLElement | null;
     if (
       target &&
@@ -510,7 +509,6 @@
         </button>
         <button class:active={view === "charts"} onclick={() => showAll("charts")}>Charts</button>
         <button class:active={view === "gallery"} onclick={() => showAll("gallery")}>Gallery</button>
-        <button class:active={view === "scene"} onclick={() => showAll("scene")}>Scene</button>
       </div>
       <button class="primary" onclick={scan} disabled={!canScan}>Scan</button>
       <button onclick={copy} disabled={!canRun} title={runHint}>Copy files</button>
@@ -543,13 +541,6 @@
         <ChartsPanel entries={scopedEntries} range={scope} onDrill={drill} />
       {:else if view === "gallery"}
         <GalleryView entries={scopedEntries} onSelect={selectEntry} />
-      {:else if view === "scene"}
-        <SceneView
-          entries={scopedEntries}
-          selected={selectedEntry}
-          onSelect={selectEntry}
-          {modelReady}
-        />
       {:else if view === "timeline"}
         <TimeScape entries={scopedEntries} selected={selectedEntry} onSelect={selectEntry} />
       {:else}

@@ -13,9 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 default = []
-depth = ["eonsort-core/depth"]
 upright = ["eonsort-core/upright"]
-diffuse = ["eonsort-core/diffuse"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

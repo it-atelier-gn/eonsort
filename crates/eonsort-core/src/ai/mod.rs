@@ -1,7 +1,7 @@
 mod prompt;
 mod transport;
 
-pub use prompt::{parse_reading, parse_scene, Reading, SceneObject, SceneReading};
+pub use prompt::{parse_reading, Reading};
 pub use transport::{probe, pull, remove, PullProgress};
 
 use crate::error::{Error, Result};
@@ -90,15 +90,6 @@ impl Client {
         let answer = transport::vision(&self.config, &image, prompt::READ_IMAGE)?;
         parse_reading(&answer)
     }
-
-    pub fn read_scene(&self, path: &Path) -> Result<SceneReading> {
-        if !self.config.usable() {
-            return Err(Error::AiDisabled);
-        }
-        let image = encode_image(path)?;
-        let answer = transport::vision(&self.config, &image, prompt::READ_SCENE)?;
-        parse_scene(&answer)
-    }
 }
 
 pub fn encode_image(path: &Path) -> Result<String> {
@@ -128,13 +119,6 @@ mod tests {
     fn a_disabled_client_refuses_rather_than_dialling_out() {
         let client = Client::new(AiConfig::default());
         let error = client.read_image(Path::new("a.jpg")).unwrap_err();
-        assert!(matches!(error, Error::AiDisabled));
-    }
-
-    #[test]
-    fn a_disabled_client_will_not_look_at_a_room_either() {
-        let client = Client::new(AiConfig::default());
-        let error = client.read_scene(Path::new("a.jpg")).unwrap_err();
         assert!(matches!(error, Error::AiDisabled));
     }
 

@@ -20,13 +20,9 @@ pub struct AppState {
     pub session: Mutex<Session>,
     pub cancel: Arc<AtomicBool>,
     pub model_cancel: Arc<AtomicBool>,
-    pub depth_cancel: Arc<AtomicBool>,
     pub upright_cancel: Arc<AtomicBool>,
-    pub diffuse_cancel: Arc<AtomicBool>,
     pub downloading: Mutex<Option<String>>,
-    pub fetching_depth: Mutex<bool>,
     pub fetching_upright: Mutex<bool>,
-    pub fetching_diffuse: Mutex<bool>,
 }
 
 impl Default for AppState {
@@ -35,13 +31,9 @@ impl Default for AppState {
             session: Mutex::new(Session::default()),
             cancel: Arc::new(AtomicBool::new(false)),
             model_cancel: Arc::new(AtomicBool::new(false)),
-            depth_cancel: Arc::new(AtomicBool::new(false)),
             upright_cancel: Arc::new(AtomicBool::new(false)),
-            diffuse_cancel: Arc::new(AtomicBool::new(false)),
             downloading: Mutex::new(None),
-            fetching_depth: Mutex::new(false),
             fetching_upright: Mutex::new(false),
-            fetching_diffuse: Mutex::new(false),
         }
     }
 }
