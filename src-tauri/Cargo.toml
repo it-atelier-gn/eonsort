@@ -16,7 +16,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 eonsort-core.workspace = true
-base64 = "0.22"
+base64 = "0.23"
 kamadak-exif.workspace = true
 image = { version = "0.25", default-features = false, features = [
     "png",
