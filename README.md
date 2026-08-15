@@ -290,31 +290,6 @@ Ctrl-C at any time; run the same command again to continue.
 
 ---
 
-## How it is put together
-
-```
-crates/eonsort-core   the engine: date providers, scanning, planning, turning, copying, verifying
-crates/eonsort-cli    the eonsort command line tool
-src-tauri             the desktop app backend and its Tauri commands
-src                   the SvelteKit front end
-```
-
-A **plan** is JSON Lines: one header record, then one per file with where it came from, every date
-each source reported, anything suspect about the chosen one, and where it will go. The copy reads
-the plan and writes its own journal beside it. Both are append-only, which is what makes every phase
-restartable.
-
-Your decisions stay out of the plan, in sidecars beside it — `*.overrides.json` for dates,
-`*.rotations.json` for turns, `*.scenes.json` for fitted rooms — so what was *detected* is never
-overwritten by what you *decided*. Everything that loads a plan by path applies the sidecars, so app
-and CLI agree.
-
-Turning a picture changes its bytes, so the copy journals the size and hash of what it wrote.
-`verify` and the duplicate check compare against that record rather than the source, so a second
-copy run recognises the turned file instead of writing `name_dup_1.jpg`.
-
----
-
 ## Contributing
 
 Contributions are welcome. For substantial changes, open an issue first.
