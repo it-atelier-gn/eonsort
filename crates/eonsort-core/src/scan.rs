@@ -7,6 +7,7 @@ use crate::model::{
 use crate::plan::{read_plan, Plan, PlanWriter};
 use crate::providers::{resolve, DetectOptions};
 use crate::rotate::Transform;
+use crate::upright::Detector;
 use chrono::Local;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,13 @@ pub struct ScanOptions {
     pub ai: AiConfig,
     #[serde(default)]
     pub auto_rotate: bool,
+    #[serde(default)]
+    pub upright_model_dir: Option<PathBuf>,
+}
+
+struct Models<'a> {
+    ai: Option<&'a Client>,
+    upright: Option<&'a Detector>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +91,15 @@ pub fn scan(
         .then(|| Client::new(options.ai.clone()))
         .filter(|client| client.config().usable());
 
+    let upright = match &options.upright_model_dir {
+        Some(dir) => Some(Detector::load(dir)?),
+        None => None,
+    };
+    let models = Models {
+        ai: ai.as_ref(),
+        upright: upright.as_ref(),
+    };
+
     let (files_total, bytes_total) = count(options, cancel, on_progress)?;
     let mut files_seen = done.len() as u64;
     let mut batch: Vec<(PathBuf, Metadata)> = Vec::with_capacity(BATCH);
@@ -97,7 +114,7 @@ pub fn scan(
         batch.push((path, meta));
 
         if batch.len() >= BATCH {
-            files_seen += flush_batch(&mut batch, options, ai.as_ref(), &mut writer)? as u64;
+            files_seen += flush_batch(&mut batch, options, &models, &mut writer)? as u64;
             on_progress(ScanProgress {
                 phase: ScanPhase::Analysing,
                 files_seen,
@@ -108,7 +125,7 @@ pub fn scan(
         }
     }
 
-    files_seen += flush_batch(&mut batch, options, ai.as_ref(), &mut writer)? as u64;
+    files_seen += flush_batch(&mut batch, options, &models, &mut writer)? as u64;
     writer.flush()?;
     drop(writer);
 
@@ -135,7 +152,7 @@ fn resumable(plan_path: &Path, header: &PlanHeader) -> Option<Plan> {
 fn flush_batch(
     batch: &mut Vec<(PathBuf, Metadata)>,
     options: &ScanOptions,
-    ai: Option<&Client>,
+    models: &Models<'_>,
     writer: &mut PlanWriter,
 ) -> Result<usize> {
     if batch.is_empty() {
@@ -143,7 +160,7 @@ fn flush_batch(
     }
     let records: Vec<PlanRecord> = batch
         .par_iter()
-        .map(|(path, meta)| analyse(path, meta, options, ai))
+        .map(|(path, meta)| analyse(path, meta, options, models))
         .collect();
     let count = records.len();
     for record in &records {
@@ -153,8 +170,8 @@ fn flush_batch(
     Ok(count)
 }
 
-fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions, ai: Option<&Client>) -> PlanRecord {
-    let Some(found) = resolve(path, meta, &options.detect, ai) else {
+fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions, models: &Models<'_>) -> PlanRecord {
+    let Some(found) = resolve(path, meta, &options.detect, models.ai) else {
         return PlanRecord::Skipped(SkippedEntry {
             source: path.to_path_buf(),
             reason: "no creation date found".into(),
@@ -163,13 +180,29 @@ fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions, ai: Option<&Clie
 
     let subject = found.reading.as_ref().and_then(|r| r.subject.clone());
 
-    let orientation = if crate::rotate::lossless_extension(path) {
+    let turnable = crate::rotate::lossless_extension(path);
+    let orientation = if turnable {
         crate::rotate::read_orientation(path)
     } else {
         0
     };
-    let rotate = if options.auto_rotate {
-        Transform::for_orientation(orientation)
+    let from_exif = Transform::for_orientation(orientation);
+
+    let guess = match models.upright {
+        Some(detector) if orientation <= 1 => detector.guess(path).ok(),
+        _ => None,
+    };
+    let guessed = guess
+        .as_ref()
+        .filter(|guess| !guess.transform.is_identity());
+
+    let rotate_reason = guessed.map(|guess| guess.reason.clone());
+    let rotate = if !options.auto_rotate {
+        Transform::None
+    } else if !from_exif.is_identity() {
+        from_exif
+    } else if turnable {
+        guessed.map(|guess| guess.transform).unwrap_or_default()
     } else {
         Transform::None
     };
@@ -199,6 +232,7 @@ fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions, ai: Option<&Clie
             subject,
             orientation,
             rotate,
+            rotate_reason,
             reencode: false,
         }),
         Err(err) => PlanRecord::Skipped(SkippedEntry {
@@ -293,6 +327,7 @@ mod tests {
             follow_symlinks: false,
             ai: Default::default(),
             auto_rotate: false,
+            upright_model_dir: None,
         }
     }
 

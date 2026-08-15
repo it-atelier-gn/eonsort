@@ -36,9 +36,8 @@
     { id: "filesystem", label: "File system", hint: "Created / modified time" },
   ];
 
-  const MANAGED: { key: "vision_model" | "embed_model"; placeholder: string }[] = [
+  const MANAGED: { key: "vision_model"; placeholder: string }[] = [
     { key: "vision_model", placeholder: "vision model" },
-    { key: "embed_model", placeholder: "embedding model" },
   ];
 
   const REMOTE_ONLY = "Only an Ollama runner can install and remove models from here";
@@ -100,7 +99,6 @@
         models: [],
         error: String(e),
         vision_present: false,
-        embed_present: false,
       };
     } finally {
       checking = false;

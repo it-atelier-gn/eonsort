@@ -1,7 +1,7 @@
 mod prompt;
 mod transport;
 
-pub use prompt::{parse_reading, Reading};
+pub use prompt::{parse_reading, parse_scene, Reading, SceneObject, SceneReading};
 pub use transport::{probe, pull, remove, PullProgress};
 
 use crate::error::{Error, Result};
@@ -11,7 +11,6 @@ use std::time::Duration;
 
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
 pub const DEFAULT_VISION_MODEL: &str = "qwen2.5vl";
-pub const DEFAULT_EMBED_MODEL: &str = "nomic-embed-text";
 pub const DEFAULT_TIMEOUT_SECONDS: u64 = 120;
 pub const MAX_IMAGE_EDGE: u32 = 1024;
 
@@ -39,7 +38,6 @@ pub struct AiConfig {
     pub endpoint: String,
     pub api: Api,
     pub vision_model: String,
-    pub embed_model: String,
     pub vision_in_scan: bool,
     pub timeout_seconds: u64,
 }
@@ -51,7 +49,6 @@ impl Default for AiConfig {
             endpoint: DEFAULT_ENDPOINT.to_string(),
             api: Api::default(),
             vision_model: DEFAULT_VISION_MODEL.to_string(),
-            embed_model: DEFAULT_EMBED_MODEL.to_string(),
             vision_in_scan: false,
             timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
         }
@@ -94,11 +91,13 @@ impl Client {
         parse_reading(&answer)
     }
 
-    pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
+    pub fn read_scene(&self, path: &Path) -> Result<SceneReading> {
         if !self.config.usable() {
             return Err(Error::AiDisabled);
         }
-        transport::embed(&self.config, text)
+        let image = encode_image(path)?;
+        let answer = transport::vision(&self.config, &image, prompt::READ_SCENE)?;
+        parse_scene(&answer)
     }
 }
 
@@ -121,26 +120,6 @@ pub fn encode_image(path: &Path) -> Result<String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(buffer.into_inner()))
 }
 
-pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    let mut dot = 0.0f32;
-    let mut left = 0.0f32;
-    let mut right = 0.0f32;
-    for (x, y) in a.iter().zip(b) {
-        dot += x * y;
-        left += x * x;
-        right += y * y;
-    }
-    let magnitude = (left.sqrt()) * (right.sqrt());
-    if magnitude == 0.0 {
-        0.0
-    } else {
-        dot / magnitude
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,7 +127,15 @@ mod tests {
     #[test]
     fn a_disabled_client_refuses_rather_than_dialling_out() {
         let client = Client::new(AiConfig::default());
-        assert!(matches!(client.embed("anything"), Err(Error::AiDisabled)));
+        let error = client.read_image(Path::new("a.jpg")).unwrap_err();
+        assert!(matches!(error, Error::AiDisabled));
+    }
+
+    #[test]
+    fn a_disabled_client_will_not_look_at_a_room_either() {
+        let client = Client::new(AiConfig::default());
+        let error = client.read_scene(Path::new("a.jpg")).unwrap_err();
+        assert!(matches!(error, Error::AiDisabled));
     }
 
     #[test]
@@ -183,19 +170,5 @@ mod tests {
             ..AiConfig::default()
         };
         assert_eq!(forever.timeout(), Duration::from_secs(3600));
-    }
-
-    #[test]
-    fn cosine_similarity_scores_identical_and_opposite_vectors() {
-        assert!((cosine(&[1.0, 0.0], &[1.0, 0.0]) - 1.0).abs() < 1e-6);
-        assert!((cosine(&[1.0, 0.0], &[-1.0, 0.0]) + 1.0).abs() < 1e-6);
-        assert!(cosine(&[1.0, 0.0], &[0.0, 1.0]).abs() < 1e-6);
-    }
-
-    #[test]
-    fn mismatched_or_empty_vectors_score_zero() {
-        assert_eq!(cosine(&[1.0, 2.0], &[1.0]), 0.0);
-        assert_eq!(cosine(&[], &[]), 0.0);
-        assert_eq!(cosine(&[0.0, 0.0], &[0.0, 0.0]), 0.0);
     }
 }

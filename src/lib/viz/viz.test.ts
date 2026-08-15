@@ -28,7 +28,6 @@ import {
   heatStep,
   hourHistogram,
   midnightShare,
-  monthGrid,
   niceTicks,
   providerCounts,
   readingCounts,
@@ -36,6 +35,15 @@ import {
   topFolders,
   HEAT_STEPS,
 } from "./charts";
+import {
+  filterRange,
+  heatGrid,
+  levelFor,
+  planRange,
+  rangeLabel,
+  sameRange,
+  selectionRange,
+} from "./range";
 import { decodeId } from "./gl";
 
 const at = (iso: string) => Date.parse(`${iso}Z`) / 1000;
@@ -276,21 +284,6 @@ describe("camera", () => {
 });
 
 describe("charts", () => {
-  it("fills in the years between the first and last file", () => {
-    const grid = monthGrid([
-      entry({ taken_epoch: at("2019-03-04T10:00:00") }),
-      entry({ taken_epoch: at("2019-03-09T10:00:00") }),
-      entry({ taken_epoch: at("2021-11-02T10:00:00") }),
-    ]);
-
-    expect(grid.years).toEqual([2019, 2020, 2021]);
-    expect(grid.counts[0][2]).toBe(2);
-    expect(grid.counts[1].every((n) => n === 0)).toBe(true);
-    expect(grid.counts[2][10]).toBe(1);
-    expect(grid.max).toBe(2);
-    expect(grid.emptyMonths).toBe(34);
-  });
-
   it("has no shading for a month with nothing in it", () => {
     expect(heatStep(0, 10)).toBeNull();
     expect(heatStep(1, 10)).not.toBeNull();
@@ -360,7 +353,6 @@ describe("charts", () => {
   });
 
   it("describes an empty plan without dividing by zero", () => {
-    expect(monthGrid([])).toEqual({ years: [], counts: [], max: 0, total: 0, emptyMonths: 0 });
     expect(span([])).toEqual({ first: null, last: null, years: 0 });
     expect(formatYear(null)).toBe("—");
     expect(providerCounts([])).toEqual([]);
@@ -380,6 +372,143 @@ describe("charts", () => {
     expect(ticks[0]).toBe(0);
     expect(ticks[ticks.length - 1]).toBeGreaterThanOrEqual(37);
     expect(niceTicks(0, 4)).toEqual([0]);
+  });
+});
+
+describe("time range drill-down", () => {
+  const spread = [
+    entry({ source: "/a", taken_epoch: at("2019-03-04T10:00:00") }),
+    entry({ source: "/b", taken_epoch: at("2019-03-09T10:00:00") }),
+    entry({ source: "/c", taken_epoch: at("2021-11-02T10:00:00") }),
+  ];
+
+  it("starts from whole years around the plan", () => {
+    expect(planRange(spread)).toEqual({
+      from: at("2019-01-01T00:00:00"),
+      to: at("2022-01-01T00:00:00"),
+    });
+    expect(planRange([])).toBeNull();
+  });
+
+  it("picks a finer grid as the range narrows", () => {
+    const level = (from: string, to: string) => levelFor({ from: at(from), to: at(to) });
+
+    expect(level("2019-01-01T00:00:00", "2022-01-01T00:00:00")).toBe("years");
+    expect(level("2019-01-01T00:00:00", "2020-01-01T00:00:00")).toBe("months");
+    expect(level("2019-03-01T00:00:00", "2019-04-01T00:00:00")).toBe("days");
+    expect(level("2019-03-04T00:00:00", "2019-03-05T00:00:00")).toBe("days");
+  });
+
+  it("counts a month per square with a row per year, filling in the empty years", () => {
+    const grid = heatGrid(spread, planRange(spread)!);
+
+    expect(grid.level).toBe("years");
+    expect(grid.rows.map((row) => row.label)).toEqual(["2019", "2020", "2021"]);
+    expect(grid.rows[0].cells[2]?.count).toBe(2);
+    expect(grid.rows[1].count).toBe(0);
+    expect(grid.rows[2].cells[10]?.count).toBe(1);
+    expect(grid.max).toBe(2);
+    expect(grid.total).toBe(3);
+    expect(grid.cellCount).toBe(36);
+    expect(grid.emptyCells).toBe(34);
+  });
+
+  it("counts a day per square inside one year, leaving out days the month has not got", () => {
+    const grid = heatGrid([entry({ taken_epoch: at("2019-02-28T10:00:00") })], {
+      from: at("2019-01-01T00:00:00"),
+      to: at("2020-01-01T00:00:00"),
+    });
+
+    expect(grid.level).toBe("months");
+    expect(grid.rows).toHaveLength(12);
+    expect(grid.rows[1].label).toBe("Feb");
+    expect(grid.rows[1].cells[27]?.count).toBe(1);
+    expect(grid.rows[1].cells[28]).toBeNull();
+    expect(grid.cellCount).toBe(365);
+  });
+
+  it("counts an hour per square inside one day", () => {
+    const grid = heatGrid([entry({ taken_epoch: at("2019-03-04T10:30:00") })], {
+      from: at("2019-03-04T00:00:00"),
+      to: at("2019-03-05T00:00:00"),
+    });
+
+    expect(grid.level).toBe("days");
+    expect(grid.rows).toHaveLength(1);
+    expect(grid.rows[0].label).toBe("4");
+    expect(grid.rows[0].cells[10]?.count).toBe(1);
+    expect(grid.cellCount).toBe(24);
+  });
+
+  it("blanks the squares either side of a range that starts mid-year", () => {
+    const grid = heatGrid(spread, {
+      from: at("2019-03-01T00:00:00"),
+      to: at("2021-01-01T00:00:00"),
+    });
+
+    expect(grid.level).toBe("years");
+    expect(grid.rows[0].cells[0]).toBeNull();
+    expect(grid.rows[0].cells[2]?.count).toBe(2);
+    expect(grid.rows[0].from).toBe(at("2019-03-01T00:00:00"));
+    expect(grid.total).toBe(2);
+  });
+
+  it("hands a row back as the range its own files sit in", () => {
+    const grid = heatGrid(spread, planRange(spread)!);
+    const row = grid.rows[0];
+
+    expect(filterRange(spread, { from: row.from, to: row.to }).map((e) => e.source)).toEqual([
+      "/a",
+      "/b",
+    ]);
+  });
+
+  it("stretches a dragged selection from the first square to the last", () => {
+    const grid = heatGrid(spread, planRange(spread)!);
+    const first = grid.rows[0].cells[2]!;
+    const last = grid.rows[2].cells[10]!;
+
+    expect(selectionRange(grid, last.index, first.index)).toEqual({
+      from: at("2019-03-01T00:00:00"),
+      to: at("2021-12-01T00:00:00"),
+    });
+    expect(selectionRange(grid, -5, -1)).toBeNull();
+  });
+
+  it("keeps the end of a range out of it", () => {
+    const edges = [
+      entry({ source: "/start", taken_epoch: at("2019-01-01T00:00:00") }),
+      entry({ source: "/end", taken_epoch: at("2019-02-01T00:00:00") }),
+    ];
+    const kept = filterRange(edges, {
+      from: at("2019-01-01T00:00:00"),
+      to: at("2019-02-01T00:00:00"),
+    });
+
+    expect(kept.map((e) => e.source)).toEqual(["/start"]);
+    expect(filterRange(edges, null)).toHaveLength(2);
+  });
+
+  it("names a range by the coarsest unit it lines up with", () => {
+    const label = (from: string, to: string) => rangeLabel({ from: at(from), to: at(to) });
+
+    expect(label("2019-01-01T00:00:00", "2020-01-01T00:00:00")).toBe("2019");
+    expect(label("2019-01-01T00:00:00", "2022-01-01T00:00:00")).toBe("2019–2021");
+    expect(label("2019-03-01T00:00:00", "2019-04-01T00:00:00")).toBe("Mar 2019");
+    expect(label("2019-03-01T00:00:00", "2019-06-01T00:00:00")).toBe("Mar 2019 – May 2019");
+    expect(label("2019-03-04T00:00:00", "2019-03-05T00:00:00")).toBe("4 Mar 2019");
+    expect(label("2019-03-04T10:00:00", "2019-03-04T12:00:00")).toBe(
+      "4 Mar 2019 10:00 – 4 Mar 2019 12:00",
+    );
+  });
+
+  it("tells two ranges apart, and no range from a range", () => {
+    const range = { from: at("2019-01-01T00:00:00"), to: at("2020-01-01T00:00:00") };
+
+    expect(sameRange(range, { ...range })).toBe(true);
+    expect(sameRange(range, { ...range, to: range.to + 1 })).toBe(false);
+    expect(sameRange(null, null)).toBe(true);
+    expect(sameRange(range, null)).toBe(false);
   });
 });
 

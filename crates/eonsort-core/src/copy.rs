@@ -518,6 +518,7 @@ mod tests {
                 follow_symlinks: false,
                 ai: Default::default(),
                 auto_rotate: false,
+                upright_model_dir: None,
             };
             scan(&plan, &options, &AtomicBool::new(false), &|_| {}).unwrap();
             Self { dir, plan }
@@ -540,6 +541,7 @@ mod tests {
                 follow_symlinks: false,
                 ai: Default::default(),
                 auto_rotate: true,
+                upright_model_dir: None,
             };
             scan(&plan, &options, &AtomicBool::new(false), &|_| {}).unwrap();
             Self { dir, plan }

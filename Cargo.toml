@@ -14,6 +14,9 @@ eonsort-core = { path = "crates/eonsort-core" }
 anyhow = "1"
 base64 = "0.22"
 blake3 = "1"
+candle-core = "0.11"
+candle-nn = "0.11"
+candle-transformers = "0.11"
 chrono = { version = "0.4", features = ["serde"] }
 filetime = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
@@ -24,6 +27,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
 thiserror = "2"
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 turbojpeg = "1.5"
 ureq = { version = "3", default-features = false, features = ["json"] }
 walkdir = "2"

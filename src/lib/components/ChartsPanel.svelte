@@ -6,13 +6,11 @@
     heatStep,
     hourHistogram,
     midnightShare,
-    monthGrid,
     niceTicks,
     providerCounts,
     readingCounts,
     span,
     topFolders,
-    MONTHS,
     PROVIDER_COLOUR,
     PROVIDER_LABEL,
     READING_COLOUR,
@@ -20,16 +18,76 @@
     READING_NOTE,
     HEAT_STEPS,
   } from "$lib/viz/charts";
+  import {
+    heatGrid,
+    planRange,
+    rangeLabel,
+    selectionRange,
+    CELL_UNIT,
+    type GridLevel,
+    type HeatCell,
+    type HeatRow,
+    type TimeRange,
+  } from "$lib/viz/range";
 
   interface Props {
     entries: EntryView[];
+    range: TimeRange | null;
+    onDrill: (range: TimeRange) => void;
   }
 
-  let { entries }: Props = $props();
+  let { entries, range, onDrill }: Props = $props();
 
   let showCounts = $state(false);
+  let dragCell = $state<HeatCell | null>(null);
+  let dragFrom = $state<number | null>(null);
+  let dragTo = $state<number | null>(null);
 
-  const grid = $derived(monthGrid(entries));
+  const HEAT_CAPTION: Record<GridLevel, string> = {
+    years:
+      "One square per month, darker to lighter as the count grows. Each row is a year, running January to December.",
+    months: "One square per day. Each row is a month, running the 1st to the 31st.",
+    days: "One square per hour. Each row is a day, running midnight to 11pm.",
+  };
+
+  const scope = $derived(range ?? planRange(entries));
+  const grid = $derived(scope === null ? null : heatGrid(entries, scope));
+  const dragging = $derived(dragFrom !== null && dragTo !== null);
+  const dragLow = $derived(Math.min(dragFrom ?? 0, dragTo ?? 0));
+  const dragHigh = $derived(Math.max(dragFrom ?? 0, dragTo ?? 0));
+
+  function startDrag(cell: HeatCell) {
+    dragCell = cell;
+    dragFrom = cell.index;
+    dragTo = cell.index;
+  }
+
+  function extendDrag(cell: HeatCell) {
+    if (dragFrom !== null) dragTo = cell.index;
+  }
+
+  function endDrag() {
+    const started = dragCell;
+    const from = dragFrom;
+    const to = dragTo;
+    dragCell = null;
+    dragFrom = null;
+    dragTo = null;
+
+    if (grid === null || from === null || to === null) return;
+    if (from === to) {
+      if (started !== null && started.count > 0) onDrill({ from: started.from, to: started.to });
+      return;
+    }
+
+    const next = selectionRange(grid, from, to);
+    if (next !== null) onDrill(next);
+  }
+
+  function drillRow(row: HeatRow) {
+    if (row.count > 0) onDrill({ from: row.from, to: row.to });
+  }
+
   const hours = $derived(hourHistogram(entries));
   const hourMax = $derived(Math.max(1, ...hours.map((h) => h.files)));
   const hourTicks = $derived(niceTicks(hourMax, 4));
@@ -46,14 +104,20 @@
   const midnightPercent = $derived(Math.round(midnight * 100));
 </script>
 
+<svelte:window onpointerup={endDrag} />
+
 <div class="charts scroll">
-  {#if entries.length === 0}
+  {#if entries.length === 0 && range !== null}
+    <p class="placeholder faint">
+      Nothing was taken in {rangeLabel(range)}. Step back up to a wider range.
+    </p>
+  {:else if entries.length === 0}
     <p class="placeholder faint">Run a scan and these charts will describe what it found.</p>
   {:else}
     <div class="tiles">
       <div class="tile">
         <span class="value">{entries.length.toLocaleString()}</span>
-        <span class="label">files planned</span>
+        <span class="label">{range === null ? "files planned" : "files in this range"}</span>
       </div>
       <div class="tile">
         <span class="value">{formatYear(reach.first)}–{formatYear(reach.last)}</span>
@@ -69,55 +133,84 @@
       </div>
     </div>
 
-    <figure>
-      <figcaption>
-        <h3>When your files were made</h3>
-        <p>
-          One square per month, darker to lighter as the count grows. Each row is a year, running
-          January to December.
-        </p>
-      </figcaption>
+    {#if grid}
+      <figure>
+        <figcaption>
+          <h3>When your files were made</h3>
+          <p>{HEAT_CAPTION[grid.level]}</p>
+        </figcaption>
 
-      <div class="heat">
-        <div class="months">
-          <span></span>
-          {#each MONTHS as month (month)}<span>{month.charAt(0)}</span>{/each}
-        </div>
-        {#each grid.years as year, row (year)}
-          <div class="months">
-            <span class="year">{year}</span>
-            {#each grid.counts[row] as count, month (month)}
-              {@const fill = heatStep(count, grid.max)}
-              <span
-                class="cell"
-                class:empty={fill === null}
-                style:background={fill ?? "transparent"}
-                title="{MONTHS[month]} {year}: {count} {count === 1 ? 'file' : 'files'}"
-              >
-                {#if showCounts && count > 0}<b>{count}</b>{/if}
-              </span>
+        <div class="heat" style:--columns={grid.columns.length}>
+          <div class="band">
+            <span></span>
+            {#each grid.columns as column, index (index)}
+              <span>{grid.level === "years" ? column.charAt(0) : column}</span>
             {/each}
           </div>
-        {/each}
-      </div>
-
-      <div class="foot">
-        <div class="ramp">
-          <span class="faint">fewer</span>
-          {#each HEAT_STEPS as step (step)}<i style:background={step}></i>{/each}
-          <span class="faint">more ({grid.max.toLocaleString()})</span>
+          {#each grid.rows as row (row.from)}
+            <div class="band">
+              <button
+                class="stub"
+                disabled={row.count === 0}
+                onclick={() => drillRow(row)}
+                title="{row.label}: {row.count.toLocaleString()} {row.count === 1
+                  ? 'file'
+                  : 'files'}"
+              >
+                {row.label}
+              </button>
+              {#each row.cells as cell, column (column)}
+                {@const fill = cell === null ? null : heatStep(cell.count, grid.max)}
+                {#if cell === null}
+                  <span class="cell gone"></span>
+                {:else}
+                  <button
+                    class="cell"
+                    class:empty={fill === null}
+                    class:picked={dragging && cell.index >= dragLow && cell.index <= dragHigh}
+                    style:background={fill ?? "transparent"}
+                    title="{cell.label}: {cell.count.toLocaleString()} {cell.count === 1
+                      ? 'file'
+                      : 'files'}"
+                    onpointerdown={(event) => {
+                      event.preventDefault();
+                      startDrag(cell);
+                    }}
+                    onpointerenter={() => extendDrag(cell)}
+                  >
+                    {#if showCounts && cell.count > 0}<b>{cell.count}</b>{/if}
+                  </button>
+                {/if}
+              {/each}
+            </div>
+          {/each}
         </div>
-        <button class="ghost" onclick={() => (showCounts = !showCounts)}>
-          {showCounts ? "Hide numbers" : "Show numbers"}
-        </button>
-      </div>
 
-      <p class="note">
-        Look for <strong>gaps</strong> — a run of empty months is either a stretch when you took no
-        pictures, or a batch whose dates went missing. A single square far from the rest is usually a
-        wrong date: {grid.emptyMonths} of the {grid.years.length * 12} months in this range are empty.
-      </p>
-    </figure>
+        <div class="foot">
+          <div class="ramp">
+            <span class="faint">fewer</span>
+            {#each HEAT_STEPS as step (step)}<i style:background={step}></i>{/each}
+            <span class="faint">more ({grid.max.toLocaleString()})</span>
+          </div>
+          <button class="ghost" onclick={() => (showCounts = !showCounts)}>
+            {showCounts ? "Hide numbers" : "Show numbers"}
+          </button>
+        </div>
+
+        <p class="note">
+          <strong>Click a square to dig into it</strong>, drag across squares to take a range, or
+          click the label on the left for a whole row. Everything below — and the Timeline, Gallery
+          and Scene tabs — follows what you pick.
+        </p>
+
+        <p class="note">
+          Look for <strong>gaps</strong> — a run of empty {CELL_UNIT[grid.level]} is either a stretch
+          when you took no pictures, or a batch whose dates went missing. A single square far from the
+          rest is usually a wrong date: {grid.emptyCells} of the {grid.cellCount}
+          {CELL_UNIT[grid.level]} in this range are empty.
+        </p>
+      </figure>
+    {/if}
 
     <figure>
       <figcaption>
@@ -333,38 +426,73 @@
     display: grid;
     gap: 2px;
     overflow-x: auto;
+    user-select: none;
   }
 
-  .months {
+  .band {
     display: grid;
-    grid-template-columns: 44px repeat(12, minmax(16px, 1fr));
+    grid-template-columns: 62px repeat(var(--columns), minmax(11px, 1fr));
     gap: 2px;
     align-items: center;
   }
 
-  .months > span {
+  .band > span {
     font-size: 9px;
     color: var(--text-faint);
     text-align: center;
   }
 
-  .year {
-    font-size: 10px !important;
-    color: var(--text-dim) !important;
-    text-align: right !important;
-    padding-right: 4px;
+  .stub {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-align: right;
+    padding: 0 4px 0 0;
+    background: transparent;
+    border-color: transparent;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stub:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+
+  .stub:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .cell {
     height: 17px;
+    padding: 0;
+    border: 0;
     border-radius: 2px;
     display: flex;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
   }
 
   .cell.empty {
     box-shadow: inset 0 0 0 1px var(--border);
+  }
+
+  .cell.gone {
+    background: transparent;
+    cursor: default;
+  }
+
+  .cell:hover:not(.gone) {
+    box-shadow: inset 0 0 0 1px var(--text-dim);
+  }
+
+  .cell.picked,
+  .cell.picked:hover {
+    box-shadow:
+      inset 0 0 0 1px var(--accent),
+      0 0 0 1px var(--accent);
   }
 
   .cell b {
