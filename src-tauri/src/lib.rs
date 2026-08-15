@@ -22,7 +22,6 @@ pub fn run() {
             commands::open_plan,
             commands::set_destination,
             commands::list_folders,
-            commands::list_entries,
             commands::list_all_entries,
             commands::list_skipped,
             commands::list_suspects,

@@ -1,6 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { buildTree, folderKey, isLeafFolder } from "./tree";
+import { buildTree, folderKey, foldersOf, isLeafFolder, under } from "./tree";
 import { baseName, formatBytes } from "./api";
+import type { EntryView } from "./api";
+
+function entry(folder: string, size = 10): EntryView {
+  return {
+    source: `${folder}/${size}/${Math.random()}`,
+    destination: "",
+    name: "a.jpg",
+    folder,
+    taken: "2023-05-06 10:11:12",
+    taken_epoch: 0,
+    provider: "exif",
+    provider_info: null,
+    size,
+    destination_exists: false,
+    outcome: null,
+    candidates: [],
+    flags: [],
+    confidence: "high",
+    override_origin: null,
+    orientation: 1,
+    rotate: "none",
+    rotate_by_hand: false,
+    rotate_lossless: true,
+    reencode: false,
+    subject: null,
+    tags: [],
+    caption: null,
+  };
+}
 
 describe("buildTree", () => {
   it("nests year and month folders", () => {
@@ -41,6 +70,50 @@ describe("buildTree", () => {
 
   it("returns nothing for an empty plan", () => {
     expect(buildTree([])).toEqual([]);
+  });
+});
+
+describe("Counting the folders the files actually land in", () => {
+  it("totals files and bytes per folder", () => {
+    const folders = foldersOf([entry("2023/05", 100), entry("2023/05", 50), entry("2019/11", 7)]);
+    expect(folders).toEqual([
+      { path: "2019/11", files: 1, bytes: 7 },
+      { path: "2023/05", files: 2, bytes: 150 },
+    ]);
+  });
+
+  it("counts nothing for an empty scope, so the tree empties with it", () => {
+    expect(foldersOf([])).toEqual([]);
+  });
+
+  it("feeds buildTree, so a narrowed scope prunes whole years away", () => {
+    const tree = buildTree(foldersOf([entry("2023/05"), entry("2023/06")]));
+    expect(tree.map((n) => n.name)).toEqual(["2023"]);
+    expect(tree[0].files).toBe(2);
+  });
+});
+
+describe("Picking a month or a whole year out of the tree", () => {
+  const pool = [entry("2023/05"), entry("2023/06"), entry("2019/11"), entry("")];
+
+  it("shows every file under a year, not just the ones filed directly in it", () => {
+    expect(under(pool, "2023")).toHaveLength(2);
+  });
+
+  it("shows the files of a single month", () => {
+    expect(under(pool, "2023/05")).toHaveLength(1);
+  });
+
+  it("does not confuse a year with one whose name merely starts the same", () => {
+    expect(under([entry("2023"), entry("20230")], "2023")).toHaveLength(1);
+  });
+
+  it("keeps the destination root to itself", () => {
+    expect(under(pool, "")).toHaveLength(1);
+  });
+
+  it("shows nothing when no folder is picked", () => {
+    expect(under(pool, null)).toEqual([]);
   });
 });
 

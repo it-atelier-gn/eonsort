@@ -11,6 +11,11 @@ tool last touched them.
 Point it at your photo folders, press **Scan**, and you get the full resulting tree as a preview
 before a byte is copied. Then press **Copy files**. Sources are only ever read.
 
+The tree is a table: **Folder**, **Files** and **Size**, each column sized to what is in it and
+draggable into whatever order you prefer, which is remembered. Clicking a folder shows everything
+underneath it, so a year lists its whole year rather than nothing at all, and a time range picked in
+**Charts** prunes the tree to match.
+
 Windows, Linux and macOS — desktop app and `eonsort` command line tool.
 
 ![Eonsort desktop app](docs/screenshot.png)

@@ -1,4 +1,4 @@
-import type { FolderNode } from "./api";
+import type { EntryView, FolderNode } from "./api";
 
 export interface TreeNode {
   name: string;
@@ -41,6 +41,31 @@ export function buildTree(folders: FolderNode[]): TreeNode[] {
 /** The tree path of a node maps back to the folder key the backend uses. */
 export function folderKey(path: string): string {
   return path === ROOT_LABEL ? "" : path;
+}
+
+export function foldersOf(entries: EntryView[]): FolderNode[] {
+  const totals = new Map<string, FolderNode>();
+
+  for (const entry of entries) {
+    const path = entry.folder;
+    const node = totals.get(path);
+    if (node) {
+      node.files += 1;
+      node.bytes += entry.size;
+    } else {
+      totals.set(path, { path, files: 1, bytes: entry.size });
+    }
+  }
+
+  return [...totals.values()].sort((a, b) =>
+    a.path.localeCompare(b.path, undefined, { numeric: true }),
+  );
+}
+
+export function under(entries: EntryView[], key: string | null): EntryView[] {
+  if (key === null) return [];
+  if (key === "") return entries.filter((entry) => entry.folder === "");
+  return entries.filter((entry) => entry.folder === key || entry.folder.startsWith(`${key}/`));
 }
 
 export function isLeafFolder(node: TreeNode): boolean {

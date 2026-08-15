@@ -10,7 +10,6 @@
     formatBytes,
     getSettings,
     listAllEntries,
-    listEntries,
     listFolders,
     listSkipped,
     listSuspects,
@@ -42,7 +41,15 @@
     type VerifyProgress,
     type VerifyReport,
   } from "$lib/api";
-  import { buildTree, type TreeNode } from "$lib/tree";
+  import { buildTree, foldersOf, under, type TreeNode } from "$lib/tree";
+  import TreeHeader from "$lib/components/TreeHeader.svelte";
+  import {
+    cleanOrder,
+    template,
+    widthOf,
+    ORDER_KEY,
+    type ColumnId,
+  } from "$lib/columns";
   import SetupPanel from "$lib/components/SetupPanel.svelte";
   import TreeItem from "$lib/components/TreeItem.svelte";
   import FileList from "$lib/components/FileList.svelte";
@@ -61,7 +68,6 @@
   let folders = $state<FolderNode[]>([]);
   let expanded = $state(new Set<string>());
   let selectedFolder = $state<string | null>(null);
-  let entries = $state<EntryView[]>([]);
   let selectedEntry = $state<EntryView | null>(null);
   let marked = $state<string[]>([]);
   let preview = $state<Preview | null>(null);
@@ -86,7 +92,28 @@
   let error = $state<string | null>(null);
   let patternError = $state<string | null>(null);
 
-  const tree = $derived<TreeNode[]>(buildTree(folders));
+  let columnOrder = $state<ColumnId[]>(rememberedOrder());
+
+  function rememberedOrder(): ColumnId[] {
+    if (typeof localStorage === "undefined") return cleanOrder(null);
+    try {
+      const held = localStorage.getItem(ORDER_KEY);
+      return cleanOrder(held === null ? null : JSON.parse(held));
+    } catch {
+      return cleanOrder(null);
+    }
+  }
+
+  function reorderColumns(next: ColumnId[]) {
+    columnOrder = next;
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(next));
+    } catch {
+      // an order we cannot remember is not worth interrupting anyone over
+    }
+  }
+
   const busy = $derived(job !== null);
   const canScan = $derived(
     !busy &&
@@ -107,10 +134,31 @@
   const issueCount = $derived(
     skipped.length + copyFailures.length + (verifyReport?.issues.length ?? 0) + suspects.length,
   );
-  const markedEntries = $derived(entries.filter((entry) => marked.includes(entry.source)));
   const modelReady = $derived(settings?.ai.enabled === true);
   const scope = $derived<TimeRange | null>(scopes[scopes.length - 1] ?? null);
   const scopedEntries = $derived(filterRange(timelineEntries, scope));
+  const entries = $derived(under(scopedEntries, selectedFolder));
+  const markedEntries = $derived(entries.filter((entry) => marked.includes(entry.source)));
+
+  const tree = $derived<TreeNode[]>(buildTree(foldersOf(scopedEntries)));
+  const flatTree = $derived(flatten(tree));
+  const columnGrid = $derived(
+    template(columnOrder, {
+      name: 0,
+      files: widthOf(
+        "files",
+        flatTree.map((node) => String(node.files)),
+      ),
+      size: widthOf(
+        "size",
+        flatTree.map((node) => formatBytes(node.bytes)),
+      ),
+    }),
+  );
+
+  function flatten(nodes: TreeNode[]): TreeNode[] {
+    return nodes.flatMap((node) => [node, ...flatten(node.children)]);
+  }
 
   function drill(next: TimeRange) {
     if (sameRange(next, scope)) return;
@@ -206,54 +254,42 @@
   }
 
   async function refreshTree(reset: boolean) {
-    timelineEntries = [];
     folders = await listFolders();
-    skipped = await listSkipped();
-    suspects = await listSuspects();
-    if (reset) {
-      scopes = [];
-      expanded = new Set(buildTree(folders).map((node) => node.path));
-      selectedFolder = null;
-      entries = [];
-      selectedEntry = null;
-      marked = [];
-      preview = null;
-    } else if (selectedFolder !== null) {
-      entries = await listEntries(selectedFolder);
-    }
-  }
-
-  async function selectFolder(key: string) {
-    selectedFolder = key;
-    entries = await listEntries(key);
-    selectedEntry = null;
-    marked = [];
-    preview = null;
-  }
-
-  async function showAll(next: "timeline" | "charts" | "gallery") {
-    view = next;
-    if (timelineEntries.length > 0) return;
     loadingAll = true;
     try {
       timelineEntries = await listAllEntries();
     } finally {
       loadingAll = false;
     }
+    skipped = await listSkipped();
+    suspects = await listSuspects();
+    if (reset) {
+      scopes = [];
+      expanded = new Set(buildTree(folders).map((node) => node.path));
+      selectedFolder = null;
+      selectedEntry = null;
+      marked = [];
+      preview = null;
+    }
+  }
+
+  function selectFolder(key: string) {
+    selectedFolder = key;
+    selectedEntry = null;
+    marked = [];
+    preview = null;
+  }
+
+  function showAll(next: "timeline" | "charts" | "gallery") {
+    view = next;
   }
 
   async function afterFix(message: string) {
     folders = await listFolders();
     suspects = await listSuspects();
 
-    if (selectedFolder !== null) {
-      entries = await listEntries(selectedFolder);
-      marked = marked.filter((source) => entries.some((entry) => entry.source === source));
-    }
-    if (view !== "folders") {
-      timelineEntries = await listAllEntries();
-      loadingAll = false;
-    }
+    timelineEntries = await listAllEntries();
+    marked = marked.filter((source) => entries.some((entry) => entry.source === source));
 
     const pool = view === "folders" ? entries : timelineEntries;
     selectedEntry = pool.find((entry) => entry.source === selectedEntry?.source) ?? null;
@@ -299,7 +335,6 @@
   function patchEntry(updated: EntryView) {
     const swap = (list: EntryView[]) =>
       list.map((entry) => (entry.source === updated.source ? updated : entry));
-    entries = swap(entries);
     timelineEntries = swap(timelineEntries);
     selectedEntry = updated;
   }
@@ -519,7 +554,7 @@
     </div>
   </header>
 
-  {#if scopes.length > 0 && view !== "folders"}
+  {#if scopes.length > 0}
     <ScopeBar
       {scopes}
       shown={scopedEntries.length}
@@ -545,12 +580,15 @@
         <TimeScape entries={scopedEntries} selected={selectedEntry} onSelect={selectEntry} />
       {:else}
         <div class="tree scroll" role="tree" aria-label="Planned folders">
+          <TreeHeader order={columnOrder} grid={columnGrid} onReorder={reorderColumns} />
           {#each tree as node (node.path)}
             <TreeItem
               {node}
               depth={0}
               selected={selectedFolder}
               {expanded}
+              order={columnOrder}
+              grid={columnGrid}
               onSelect={selectFolder}
               onToggle={toggleFolder}
             />

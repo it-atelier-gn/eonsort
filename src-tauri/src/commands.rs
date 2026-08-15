@@ -404,31 +404,6 @@ pub fn list_folders(state: State<'_, AppState>) -> Vec<FolderNode> {
 }
 
 #[tauri::command]
-pub fn list_entries(state: State<'_, AppState>, folder: String) -> Vec<EntryView> {
-    let session = state.session.lock().unwrap();
-    let Some(plan) = &session.plan else {
-        return Vec::new();
-    };
-
-    let mut views: Vec<EntryView> = plan
-        .entries
-        .iter()
-        .filter(|e| relative_folder(e, plan.header.root()) == folder)
-        .map(|entry| {
-            view(
-                entry,
-                plan.header.root(),
-                &session.journal,
-                &session.overrides,
-                &session.rotations,
-            )
-        })
-        .collect();
-    views.sort_by(|a, b| a.name.cmp(&b.name));
-    views
-}
-
-#[tauri::command]
 pub fn list_all_entries(state: State<'_, AppState>) -> Vec<EntryView> {
     let session = state.session.lock().unwrap();
     let Some(plan) = &session.plan else {

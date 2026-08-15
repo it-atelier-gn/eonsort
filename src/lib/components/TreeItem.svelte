@@ -1,6 +1,7 @@
 <script lang="ts">
   import { formatBytes } from "$lib/api";
   import { folderKey, type TreeNode } from "$lib/tree";
+  import type { ColumnId } from "$lib/columns";
   import Self from "./TreeItem.svelte";
 
   interface Props {
@@ -8,11 +9,13 @@
     depth: number;
     selected: string | null;
     expanded: Set<string>;
+    order: ColumnId[];
+    grid: string;
     onSelect: (key: string) => void;
     onToggle: (path: string) => void;
   }
 
-  let { node, depth, selected, expanded, onSelect, onToggle }: Props = $props();
+  let { node, depth, selected, expanded, order, grid, onSelect, onToggle }: Props = $props();
 
   const hasChildren = $derived(node.children.length > 0);
   const isOpen = $derived(expanded.has(node.path));
@@ -20,16 +23,18 @@
 
   function activate() {
     onSelect(folderKey(node.path));
-    if (hasChildren) {
-      onToggle(node.path);
-    }
+  }
+
+  function fold(event: MouseEvent) {
+    event.stopPropagation();
+    onToggle(node.path);
   }
 </script>
 
 <div
   class="row"
   class:selected={isSelected}
-  style="padding-left: {8 + depth * 14}px"
+  style="grid-template-columns: {grid}"
   title="{node.files} files, {formatBytes(node.bytes)}"
   role="treeitem"
   aria-selected={isSelected}
@@ -41,26 +46,54 @@
       e.preventDefault();
       activate();
     }
+    if (e.key === "ArrowRight" && hasChildren && !isOpen) onToggle(node.path);
+    if (e.key === "ArrowLeft" && hasChildren && isOpen) onToggle(node.path);
   }}
 >
-  <span class="chevron" class:open={isOpen} class:hidden={!hasChildren}>›</span>
-  <span class="name truncate">{node.name}</span>
-  <span class="count faint">{node.files}</span>
+  {#each order as id (id)}
+    {#if id === "name"}
+      <span class="cell name" style="padding-left: {depth * 14}px">
+        <span
+          class="chevron"
+          class:open={isOpen}
+          class:hidden={!hasChildren}
+          role="presentation"
+          onclick={fold}
+        >
+          ›
+        </span>
+        <span class="truncate">{node.name}</span>
+      </span>
+    {:else if id === "files"}
+      <span class="cell number faint">{node.files}</span>
+    {:else}
+      <span class="cell number faint">{formatBytes(node.bytes)}</span>
+    {/if}
+  {/each}
 </div>
 
 {#if hasChildren && isOpen}
   {#each node.children as child (child.path)}
-    <Self node={child} depth={depth + 1} {selected} {expanded} {onSelect} {onToggle} />
+    <Self
+      node={child}
+      depth={depth + 1}
+      {selected}
+      {expanded}
+      {order}
+      {grid}
+      {onSelect}
+      {onToggle}
+    />
   {/each}
 {/if}
 
 <style>
   .row {
-    display: flex;
+    display: grid;
     align-items: center;
     gap: 6px;
     padding-block: 4px;
-    padding-right: 8px;
+    padding-inline: 8px;
     cursor: pointer;
     user-select: none;
     border-left: 2px solid transparent;
@@ -75,9 +108,26 @@
     border-left-color: var(--accent);
   }
 
+  .cell {
+    min-width: 0;
+  }
+
+  .name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .number {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
   .chevron {
     display: inline-block;
     width: 10px;
+    flex: none;
     color: var(--text-faint);
     transition: transform 0.12s ease;
   }
@@ -88,14 +138,5 @@
 
   .chevron.hidden {
     visibility: hidden;
-  }
-
-  .name {
-    flex: 1;
-  }
-
-  .count {
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
   }
 </style>

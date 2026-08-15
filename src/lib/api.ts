@@ -251,7 +251,6 @@ export const setDestination = (destination: string | null) =>
 export const thumbnailFor = (path: string, edge: number, rotate?: Transform) =>
   invoke<Thumbnail>("thumbnail_for", { path, edge, rotate: rotate ?? null });
 export const listFolders = () => invoke<FolderNode[]>("list_folders");
-export const listEntries = (folder: string) => invoke<EntryView[]>("list_entries", { folder });
 export const listAllEntries = () => invoke<EntryView[]>("list_all_entries");
 export const listSkipped = () => invoke<SkippedView[]>("list_skipped");
 export const listSuspects = () => invoke<SuspectGroup[]>("list_suspects");
