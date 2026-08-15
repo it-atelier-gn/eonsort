@@ -12,7 +12,7 @@ repository = "https://github.com/it-atelier-gn/eonsort"
 [workspace.dependencies]
 eonsort-core = { path = "crates/eonsort-core" }
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 blake3 = "1"
 candle-core = "0.11"
 candle-nn = "0.11"
