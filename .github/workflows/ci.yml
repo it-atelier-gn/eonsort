@@ -79,6 +79,40 @@ jobs:
       - name: Test Rust
         run: cargo test --workspace
 
+  depth:
+    name: Depth feature
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm
+      - run: cargo clippy -p eonsort-core --features depth --all-targets -- -D warnings
+      - run: cargo test -p eonsort-core --features depth
+
+  diffuse:
+    name: Diffuse feature
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm
+      - run: cargo clippy -p eonsort-core --features diffuse --all-targets -- -D warnings
+      - run: cargo test -p eonsort-core --features diffuse
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest

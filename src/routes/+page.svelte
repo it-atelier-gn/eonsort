@@ -51,6 +51,9 @@
   import TimeScape from "$lib/components/TimeScape.svelte";
   import ChartsPanel from "$lib/components/ChartsPanel.svelte";
   import GalleryView from "$lib/components/GalleryView.svelte";
+  import SceneView from "$lib/components/SceneView.svelte";
+  import ScopeBar from "$lib/components/ScopeBar.svelte";
+  import { filterRange, sameRange, type TimeRange } from "$lib/viz/range";
 
   type Job = "scan" | "copy" | "verify";
 
@@ -66,9 +69,10 @@
   let previewLoading = $state(false);
   let suspects = $state<SuspectGroup[]>([]);
   let fixing = $state(false);
-  let view = $state<"folders" | "timeline" | "charts" | "gallery">("folders");
+  let view = $state<"folders" | "timeline" | "charts" | "gallery" | "scene">("folders");
   let timelineEntries = $state<EntryView[]>([]);
   let loadingAll = $state(false);
+  let scopes = $state<TimeRange[]>([]);
 
   let job = $state<Job | null>(null);
   let scanProgress = $state<ScanProgress | null>(null);
@@ -106,6 +110,17 @@
   );
   const markedEntries = $derived(entries.filter((entry) => marked.includes(entry.source)));
   const modelReady = $derived(settings?.ai.enabled === true);
+  const scope = $derived<TimeRange | null>(scopes[scopes.length - 1] ?? null);
+  const scopedEntries = $derived(filterRange(timelineEntries, scope));
+
+  function drill(next: TimeRange) {
+    if (sameRange(next, scope)) return;
+    scopes = [...scopes, next];
+  }
+
+  function popScope(depth: number) {
+    scopes = scopes.slice(0, Math.max(0, depth));
+  }
 
   function scanProviders(current: Settings): Provider[] {
     if (current.ai.enabled && current.ai.vision_in_scan) return current.providers;
@@ -197,6 +212,7 @@
     skipped = await listSkipped();
     suspects = await listSuspects();
     if (reset) {
+      scopes = [];
       expanded = new Set(buildTree(folders).map((node) => node.path));
       selectedFolder = null;
       entries = [];
@@ -216,7 +232,7 @@
     preview = null;
   }
 
-  async function showAll(next: "timeline" | "charts" | "gallery") {
+  async function showAll(next: "timeline" | "charts" | "gallery" | "scene") {
     view = next;
     if (timelineEntries.length > 0) return;
     loadingAll = true;
@@ -332,7 +348,7 @@
 
   function onKeydown(event: KeyboardEvent) {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (view === "gallery" || busy || fixing) return;
+    if (view === "gallery" || view === "scene" || busy || fixing) return;
     const target = event.target as HTMLElement | null;
     if (
       target &&
@@ -494,6 +510,7 @@
         </button>
         <button class:active={view === "charts"} onclick={() => showAll("charts")}>Charts</button>
         <button class:active={view === "gallery"} onclick={() => showAll("gallery")}>Gallery</button>
+        <button class:active={view === "scene"} onclick={() => showAll("scene")}>Scene</button>
       </div>
       <button class="primary" onclick={scan} disabled={!canScan}>Scan</button>
       <button onclick={copy} disabled={!canRun} title={runHint}>Copy files</button>
@@ -503,6 +520,15 @@
       {/if}
     </div>
   </header>
+
+  {#if scopes.length > 0 && view !== "folders"}
+    <ScopeBar
+      {scopes}
+      shown={scopedEntries.length}
+      total={timelineEntries.length}
+      onPop={popScope}
+    />
+  {/if}
 
   {#if settings}
     <main class:wide={view !== "folders"}>
@@ -514,11 +540,18 @@
           Reading {summary ? summary.files.toLocaleString() : ""} files out of the plan…
         </div>
       {:else if view === "charts"}
-        <ChartsPanel entries={timelineEntries} />
+        <ChartsPanel entries={scopedEntries} range={scope} onDrill={drill} />
       {:else if view === "gallery"}
-        <GalleryView entries={timelineEntries} onSelect={selectEntry} />
+        <GalleryView entries={scopedEntries} onSelect={selectEntry} />
+      {:else if view === "scene"}
+        <SceneView
+          entries={scopedEntries}
+          selected={selectedEntry}
+          onSelect={selectEntry}
+          {modelReady}
+        />
       {:else if view === "timeline"}
-        <TimeScape entries={timelineEntries} selected={selectedEntry} onSelect={selectEntry} />
+        <TimeScape entries={scopedEntries} selected={selectedEntry} onSelect={selectEntry} />
       {:else}
         <div class="tree scroll" role="tree" aria-label="Planned folders">
           {#each tree as node (node.path)}
@@ -656,8 +689,8 @@
 
 <style>
   .app {
-    display: grid;
-    grid-template-rows: auto 1fr auto auto auto;
+    display: flex;
+    flex-direction: column;
     height: 100vh;
   }
 
@@ -703,6 +736,7 @@
   main {
     display: grid;
     grid-template-columns: 300px 230px minmax(0, 1fr) 340px;
+    flex: 1;
     min-height: 0;
   }
 
@@ -759,6 +793,7 @@
   }
 
   .issues {
+    flex-shrink: 0;
     max-height: 180px;
     padding: 10px 14px;
     background: var(--bg-raised);
@@ -816,6 +851,7 @@
 
   footer {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 12px;
     padding: 6px 10px 6px 14px;

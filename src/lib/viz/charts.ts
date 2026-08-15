@@ -50,46 +50,6 @@ export const HEAT_STEPS = [
   "#cde2fb",
 ];
 
-export interface MonthGrid {
-  years: number[];
-  counts: number[][];
-  max: number;
-  total: number;
-  emptyMonths: number;
-}
-
-export function monthGrid(entries: EntryView[]): MonthGrid {
-  if (entries.length === 0) {
-    return { years: [], counts: [], max: 0, total: 0, emptyMonths: 0 };
-  }
-
-  const seen = new Map<number, number[]>();
-  let first = Infinity;
-  let last = -Infinity;
-
-  for (const entry of entries) {
-    const date = new Date(entry.taken_epoch * 1000);
-    const year = date.getUTCFullYear();
-    first = Math.min(first, year);
-    last = Math.max(last, year);
-    let row = seen.get(year);
-    if (!row) {
-      row = new Array(12).fill(0);
-      seen.set(year, row);
-    }
-    row[date.getUTCMonth()] += 1;
-  }
-
-  const years: number[] = [];
-  for (let year = first; year <= last; year += 1) years.push(year);
-
-  const counts = years.map((year) => seen.get(year) ?? new Array(12).fill(0));
-  const max = Math.max(...counts.flat());
-  const emptyMonths = counts.flat().filter((n) => n === 0).length;
-
-  return { years, counts, max, total: entries.length, emptyMonths };
-}
-
 export function heatStep(count: number, max: number): string | null {
   if (count <= 0 || max <= 0) return null;
   const share = Math.log1p(count) / Math.log1p(max);

@@ -4,6 +4,9 @@ use crate::state::AppState;
 use chrono::{Local, NaiveDate, NaiveDateTime};
 use eonsort_core::ai::{self, AiConfig, Client};
 use eonsort_core::copy::{self, CopyOptions, CopyProgress, CopyReport, Outcome};
+use eonsort_core::depth;
+use eonsort_core::diffuse;
+use eonsort_core::inpaint;
 use eonsort_core::model::PlanEntry;
 use eonsort_core::overrides::{
     self, DateOverride, OverrideOrigin, Overrides, RotationOverride, Rotations,
@@ -11,9 +14,10 @@ use eonsort_core::overrides::{
 use eonsort_core::providers::{DetectOptions, Provider, Strategy};
 use eonsort_core::rotate::{self, Transform};
 use eonsort_core::scan::{ScanOptions, ScanProgress};
-use eonsort_core::search;
+use eonsort_core::scenes;
 use eonsort_core::similar;
 use eonsort_core::suspect::{self, EntryFacts, Flag};
+use eonsort_core::upright;
 use eonsort_core::verify::{VerifyOptions, VerifyProgress, VerifyReport};
 use eonsort_core::{default_plan_name, read_plan, validate_folder_pattern, Plan};
 use serde::{Deserialize, Serialize};
@@ -39,6 +43,8 @@ pub struct ScanRequest {
     pub ai: AiConfig,
     #[serde(default)]
     pub auto_rotate: bool,
+    #[serde(default)]
+    pub upright: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,7 +53,6 @@ pub struct ModelStatus {
     pub models: Vec<String>,
     pub error: Option<String>,
     pub vision_present: bool,
-    pub embed_present: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -206,6 +211,10 @@ pub fn start_scan(
         },
         follow_symlinks: request.follow_symlinks,
         auto_rotate: request.auto_rotate,
+        upright_model_dir: request
+            .upright
+            .then(|| models_directory(&app))
+            .transpose()?,
     };
 
     let handle = app.clone();
@@ -966,124 +975,6 @@ pub fn set_excluded(
     Ok(changed)
 }
 
-#[derive(Clone, Serialize)]
-struct IndexProgress {
-    done: usize,
-    total: usize,
-}
-
-#[tauri::command]
-pub fn build_search_index(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let config = settings::load(&app).ai;
-    if !config.usable() {
-        return Err("switch the local model on in the setup panel first".into());
-    }
-
-    let (plan_path, entries) = {
-        let session = state.session.lock().unwrap();
-        let plan = session.plan.as_ref().ok_or("run a scan first")?;
-        (
-            session.plan_path.clone().ok_or("no plan is open")?,
-            plan.entries.clone(),
-        )
-    };
-
-    state.begin("Indexing")?;
-    let handle = app.clone();
-
-    std::thread::spawn(move || {
-        let state = handle.state::<AppState>();
-        let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
-        let client = Client::new(config);
-
-        let built = search::build(&client, &entries, &state.cancel, &|done, total| {
-            emit_throttled(
-                &handle,
-                "index:progress",
-                &IndexProgress { done, total },
-                &throttle,
-            );
-        });
-        state.finish();
-
-        match built.and_then(|index| {
-            let count = index.len();
-            search::write(&search::index_path(&plan_path), &index).map(|_| count)
-        }) {
-            Ok(count) => {
-                let _ = handle.emit("index:done", count as u64);
-            }
-            Err(err) => {
-                let _ = handle.emit("index:error", err.to_string());
-            }
-        }
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn search_entries(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    query: String,
-    limit: usize,
-) -> Result<Vec<EntryView>, String> {
-    if query.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let config = settings::load(&app).ai;
-    if !config.usable() {
-        return Err("switch the local model on in the setup panel first".into());
-    }
-
-    let plan_path = {
-        let session = state.session.lock().unwrap();
-        session.plan_path.clone().ok_or("no plan is open")?
-    };
-
-    let index = search::read(&search::index_path(&plan_path)).map_err(|e| e.to_string())?;
-    if index.is_empty() {
-        return Err("build the search index first".into());
-    }
-
-    let vector = Client::new(config)
-        .embed(query.trim())
-        .map_err(|e| e.to_string())?;
-    let hits = index.rank(&vector, limit.clamp(1, 500));
-
-    let session = state.session.lock().unwrap();
-    let plan = session.plan.as_ref().ok_or("no plan is open")?;
-    let by_source: std::collections::HashMap<&PathBuf, &PlanEntry> =
-        plan.entries.iter().map(|e| (&e.source, e)).collect();
-
-    Ok(hits
-        .into_iter()
-        .filter_map(|(source, _)| by_source.get(&source).copied())
-        .map(|entry| {
-            view(
-                entry,
-                plan.header.root(),
-                &session.journal,
-                &session.overrides,
-                &session.rotations,
-            )
-        })
-        .collect())
-}
-
-#[tauri::command]
-pub fn search_index_size(state: State<'_, AppState>) -> u64 {
-    let session = state.session.lock().unwrap();
-    session
-        .plan_path
-        .as_ref()
-        .and_then(|p| search::read(&search::index_path(p)).ok())
-        .map(|index| index.len() as u64)
-        .unwrap_or(0)
-}
-
 #[tauri::command]
 pub fn check_model(config: AiConfig) -> ModelStatus {
     match ai::probe(&config) {
@@ -1098,7 +989,6 @@ pub fn check_model(config: AiConfig) -> ModelStatus {
             ModelStatus {
                 reachable: true,
                 vision_present: has(&config.vision_model),
-                embed_present: has(&config.embed_model),
                 models,
                 error: None,
             }
@@ -1107,7 +997,6 @@ pub fn check_model(config: AiConfig) -> ModelStatus {
             reachable: false,
             models: Vec::new(),
             vision_present: false,
-            embed_present: false,
             error: Some(err.to_string()),
         },
     }
@@ -1194,6 +1083,356 @@ pub fn read_with_model(app: AppHandle, source: PathBuf) -> Result<ReadingView, S
         tags: reading.tags,
         caption: reading.caption,
     })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SceneObjectView {
+    pub label: String,
+    pub bounds: [f32; 4],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SceneGuessView {
+    pub scene_type: Option<String>,
+    pub flat: bool,
+    pub vanishing_point: [f32; 2],
+    pub back_wall: [f32; 4],
+    pub objects: Vec<SceneObjectView>,
+}
+
+#[tauri::command]
+pub fn fit_scene_with_model(app: AppHandle, source: PathBuf) -> Result<SceneGuessView, String> {
+    let config = settings::load(&app).ai;
+    if !config.usable() {
+        return Err("switch the local model on in the setup panel first".into());
+    }
+
+    let reading = Client::new(config)
+        .read_scene(&source)
+        .map_err(|e| e.to_string())?;
+
+    Ok(SceneGuessView {
+        scene_type: reading.scene_type,
+        flat: reading.flat,
+        vanishing_point: [reading.vanishing_point.0, reading.vanishing_point.1],
+        back_wall: [
+            reading.back_wall.0,
+            reading.back_wall.1,
+            reading.back_wall.2,
+            reading.back_wall.3,
+        ],
+        objects: reading
+            .objects
+            .into_iter()
+            .map(|object| SceneObjectView {
+                label: object.label,
+                bounds: [
+                    object.bounds.0,
+                    object.bounds.1,
+                    object.bounds.2,
+                    object.bounds.3,
+                ],
+            })
+            .collect(),
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SceneFitView {
+    pub vp: [f32; 2],
+    pub rect: [f32; 4],
+    pub focal: f32,
+    #[serde(default)]
+    pub objects: Vec<SceneObjectView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DepthModelStatus {
+    pub present: bool,
+    pub bytes: u64,
+    pub total: u64,
+    pub built_in: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DepthGridView {
+    pub width: u32,
+    pub height: u32,
+    pub data: String,
+}
+
+fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("models");
+    Ok(dir)
+}
+
+#[tauri::command]
+pub fn depth_model_status(app: AppHandle) -> Result<DepthModelStatus, String> {
+    let dir = models_directory(&app)?;
+    Ok(DepthModelStatus {
+        present: depth::installed(&dir),
+        bytes: depth::present_bytes(&dir),
+        total: depth::total_bytes(),
+        built_in: cfg!(feature = "depth"),
+    })
+}
+
+#[tauri::command]
+pub fn install_depth_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if !cfg!(feature = "depth") {
+        return Err("this build was made without the depth model".into());
+    }
+
+    {
+        let mut fetching = state.fetching_depth.lock().unwrap();
+        if *fetching {
+            return Err("the depth model is already downloading".into());
+        }
+        *fetching = true;
+    }
+
+    state.depth_cancel.store(false, Ordering::Relaxed);
+    let dir = models_directory(&app)?;
+    let handle = app.clone();
+
+    std::thread::spawn(move || {
+        let state = handle.state::<AppState>();
+        let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
+
+        let result = depth::download(
+            &dir,
+            &state.depth_cancel,
+            &|progress: depth::DepthProgress| {
+                emit_throttled(&handle, "depth:progress", &progress, &throttle);
+            },
+        );
+        *state.fetching_depth.lock().unwrap() = false;
+
+        match result {
+            Ok(()) => {
+                let _ = handle.emit("depth:done", depth::present_bytes(&dir));
+            }
+            Err(err) => {
+                let _ = handle.emit("depth:error", err.to_string());
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_depth_install(state: State<'_, AppState>) {
+    state.depth_cancel.store(true, Ordering::Relaxed);
+}
+
+#[tauri::command]
+pub async fn estimate_depth(
+    app: AppHandle,
+    source: PathBuf,
+    edge: u32,
+) -> Result<DepthGridView, String> {
+    let dir = models_directory(&app)?;
+
+    tauri::async_runtime::spawn_blocking(move || depth::estimate(&dir, &source, edge))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|grid| {
+            use base64::Engine;
+            DepthGridView {
+                width: grid.width,
+                height: grid.height,
+                data: base64::engine::general_purpose::STANDARD.encode(&grid.data),
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UprightModelStatus {
+    pub present: bool,
+    pub bytes: u64,
+    pub total: u64,
+    pub built_in: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UprightGuessView {
+    pub transform: String,
+    pub confidence: f32,
+    pub reason: String,
+}
+
+#[tauri::command]
+pub fn upright_model_status(app: AppHandle) -> Result<UprightModelStatus, String> {
+    let dir = models_directory(&app)?;
+    Ok(UprightModelStatus {
+        present: upright::installed(&dir),
+        bytes: upright::present_bytes(&dir),
+        total: upright::total_bytes(),
+        built_in: cfg!(feature = "upright"),
+    })
+}
+
+#[tauri::command]
+pub fn install_upright_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if !cfg!(feature = "upright") {
+        return Err("this build was made without the upright model".into());
+    }
+
+    {
+        let mut fetching = state.fetching_upright.lock().unwrap();
+        if *fetching {
+            return Err("the upright model is already downloading".into());
+        }
+        *fetching = true;
+    }
+
+    state.upright_cancel.store(false, Ordering::Relaxed);
+    let dir = models_directory(&app)?;
+    let handle = app.clone();
+
+    std::thread::spawn(move || {
+        let state = handle.state::<AppState>();
+        let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
+
+        let result = upright::download(
+            &dir,
+            &state.upright_cancel,
+            &|progress: upright::UprightProgress| {
+                emit_throttled(&handle, "upright:progress", &progress, &throttle);
+            },
+        );
+        *state.fetching_upright.lock().unwrap() = false;
+
+        match result {
+            Ok(()) => {
+                let _ = handle.emit("upright:done", upright::present_bytes(&dir));
+            }
+            Err(err) => {
+                let _ = handle.emit("upright:error", err.to_string());
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_upright_install(state: State<'_, AppState>) {
+    state.upright_cancel.store(true, Ordering::Relaxed);
+}
+
+#[tauri::command]
+pub async fn guess_upright(app: AppHandle, source: PathBuf) -> Result<UprightGuessView, String> {
+    let dir = models_directory(&app)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        upright::Detector::load(&dir).and_then(|detector| detector.guess(&source))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map(|guess| UprightGuessView {
+        transform: rotate_label(guess.transform).to_string(),
+        confidence: guess.confidence,
+        reason: guess.reason,
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn detect_objects(
+    app: AppHandle,
+    source: PathBuf,
+) -> Result<Vec<SceneObjectView>, String> {
+    let dir = models_directory(&app)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        upright::Detector::load(&dir).and_then(|detector| detector.objects(&source))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map(|found| {
+        found
+            .into_iter()
+            .map(|object| SceneObjectView {
+                label: object.label,
+                bounds: object.bounds,
+            })
+            .collect()
+    })
+    .map_err(|e| e.to_string())
+}
+
+fn scene_store(app: &AppHandle) -> Option<PathBuf> {
+    let state = app.state::<AppState>();
+    let session = state.session.lock().unwrap();
+    session.plan_path.as_deref().map(scenes::scenes_path)
+}
+
+#[tauri::command]
+pub fn get_scene_fit(app: AppHandle, source: PathBuf) -> Result<Option<SceneFitView>, String> {
+    let Some(path) = scene_store(&app) else {
+        return Ok(None);
+    };
+    let stored = scenes::read(&path).map_err(|e| e.to_string())?;
+
+    Ok(stored.get(&source).map(|fit| SceneFitView {
+        vp: fit.vp,
+        rect: fit.rect,
+        focal: fit.focal,
+        objects: fit
+            .objects
+            .iter()
+            .map(|object| SceneObjectView {
+                label: object.label.clone(),
+                bounds: object.bounds,
+            })
+            .collect(),
+    }))
+}
+
+#[tauri::command]
+pub fn set_scene_fit(app: AppHandle, source: PathBuf, fit: SceneFitView) -> Result<(), String> {
+    let Some(path) = scene_store(&app) else {
+        return Ok(());
+    };
+    let mut stored = scenes::read(&path).map_err(|e| e.to_string())?;
+
+    stored.set(
+        source,
+        scenes::SceneFit {
+            vp: fit.vp,
+            rect: fit.rect,
+            focal: fit.focal,
+            objects: fit
+                .objects
+                .into_iter()
+                .map(|object| scenes::SceneObjectFit {
+                    label: object.label,
+                    bounds: object.bounds,
+                })
+                .collect(),
+            at: Local::now().naive_local(),
+        },
+    );
+    scenes::write(&path, &stored).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clear_scene_fit(app: AppHandle, source: PathBuf) -> Result<(), String> {
+    let Some(path) = scene_store(&app) else {
+        return Ok(());
+    };
+    let mut stored = scenes::read(&path).map_err(|e| e.to_string())?;
+    if !stored.clear(&source) {
+        return Ok(());
+    }
+    scenes::write(&path, &stored).map_err(|e| e.to_string())
 }
 
 fn view(
@@ -1463,6 +1702,166 @@ fn emit_throttled<T: Serialize + Clone>(
     *last = Instant::now();
     drop(last);
     let _ = app.emit(event, payload.clone());
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FillRequest {
+    pub endpoint: String,
+    pub key: String,
+    pub model: String,
+    pub prompt: String,
+    pub size: String,
+    pub image: String,
+    pub mask: String,
+}
+
+#[tauri::command]
+pub async fn fill_with_service(request: FillRequest) -> Result<String, String> {
+    use base64::Engine;
+    let coder = base64::engine::general_purpose::STANDARD;
+
+    let image = decode_png(&coder, &request.image, "photograph")?;
+    let mask = decode_png(&coder, &request.mask, "mask")?;
+
+    let model = if request.model.trim().is_empty() {
+        inpaint::DEFAULT_MODEL.to_string()
+    } else {
+        request.model.trim().to_string()
+    };
+    let prompt = if request.prompt.trim().is_empty() {
+        inpaint::DEFAULT_PROMPT.to_string()
+    } else {
+        request.prompt.trim().to_string()
+    };
+
+    let edit = inpaint::Edit {
+        endpoint: request.endpoint,
+        key: request.key,
+        model,
+        prompt,
+        size: request.size.trim().to_string(),
+        image,
+        mask,
+    };
+
+    tauri::async_runtime::spawn_blocking(move || inpaint::fill(&edit))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|filled| coder.encode(filled))
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiffuseModelStatus {
+    pub present: bool,
+    pub bytes: u64,
+    pub total: u64,
+    pub built_in: bool,
+}
+
+#[tauri::command]
+pub fn diffuse_model_status(app: AppHandle) -> Result<DiffuseModelStatus, String> {
+    let dir = models_directory(&app)?;
+    Ok(DiffuseModelStatus {
+        present: diffuse::installed(&dir),
+        bytes: diffuse::present_bytes(&dir),
+        total: diffuse::total_bytes(),
+        built_in: cfg!(feature = "diffuse"),
+    })
+}
+
+#[tauri::command]
+pub fn install_diffuse_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if !cfg!(feature = "diffuse") {
+        return Err("this build was made without the painting model".into());
+    }
+
+    {
+        let mut fetching = state.fetching_diffuse.lock().unwrap();
+        if *fetching {
+            return Err("the painting model is already downloading".into());
+        }
+        *fetching = true;
+    }
+
+    state.diffuse_cancel.store(false, Ordering::Relaxed);
+    let dir = models_directory(&app)?;
+    let handle = app.clone();
+
+    std::thread::spawn(move || {
+        let state = handle.state::<AppState>();
+        let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
+
+        let result = diffuse::download(
+            &dir,
+            &state.diffuse_cancel,
+            &|progress: diffuse::DiffuseProgress| {
+                emit_throttled(&handle, "diffuse:progress", &progress, &throttle);
+            },
+        );
+        *state.fetching_diffuse.lock().unwrap() = false;
+
+        match result {
+            Ok(()) => {
+                let _ = handle.emit("diffuse:done", diffuse::present_bytes(&dir));
+            }
+            Err(err) => {
+                let _ = handle.emit("diffuse:error", err.to_string());
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_diffuse_install(state: State<'_, AppState>) {
+    state.diffuse_cancel.store(true, Ordering::Relaxed);
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PaintRequest {
+    pub prompt: String,
+    pub steps: usize,
+    pub image: String,
+    pub mask: String,
+}
+
+#[tauri::command]
+pub async fn fill_here(app: AppHandle, request: PaintRequest) -> Result<String, String> {
+    use base64::Engine;
+    let coder = base64::engine::general_purpose::STANDARD;
+    let dir = models_directory(&app)?;
+
+    let image = decode_png(&coder, &request.image, "photograph")?;
+    let mask = decode_png(&coder, &request.mask, "mask")?;
+    let prompt = if request.prompt.trim().is_empty() {
+        inpaint::DEFAULT_PROMPT.to_string()
+    } else {
+        request.prompt.trim().to_string()
+    };
+    let steps = request.steps;
+
+    tauri::async_runtime::spawn_blocking(move || diffuse::fill(&dir, &image, &mask, &prompt, steps))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|painted| coder.encode(painted))
+        .map_err(|e| e.to_string())
+}
+
+fn decode_png(
+    coder: &base64::engine::general_purpose::GeneralPurpose,
+    encoded: &str,
+    what: &str,
+) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    let body = encoded
+        .rsplit_once("base64,")
+        .map(|(_, tail)| tail)
+        .unwrap_or(encoded);
+    coder
+        .decode(body.trim())
+        .map_err(|e| format!("the {what} could not be read: {e}"))
 }
 
 #[cfg(test)]

@@ -10,7 +10,6 @@ export interface AiConfig {
   endpoint: string;
   api: ModelApi;
   vision_model: string;
-  embed_model: string;
   vision_in_scan: boolean;
   timeout_seconds: number;
 }
@@ -26,7 +25,6 @@ export interface ModelStatus {
   models: string[];
   error: string | null;
   vision_present: boolean;
-  embed_present: boolean;
 }
 
 export interface ReadingView {
@@ -156,6 +154,45 @@ export type Transform =
   | "transpose"
   | "transverse";
 
+export interface SceneObjectView {
+  label: string;
+  bounds: [number, number, number, number];
+}
+
+export interface SceneFitView {
+  vp: [number, number];
+  rect: [number, number, number, number];
+  focal: number;
+  objects: SceneObjectView[];
+}
+
+export interface SceneGuessView {
+  scene_type: string | null;
+  flat: boolean;
+  vanishing_point: [number, number];
+  back_wall: [number, number, number, number];
+  objects: SceneObjectView[];
+}
+
+export interface DepthModelStatus {
+  present: boolean;
+  bytes: number;
+  total: number;
+  built_in: boolean;
+}
+
+export interface DepthProgress {
+  file: string;
+  completed: number;
+  total: number;
+}
+
+export interface DepthGridView {
+  width: number;
+  height: number;
+  data: string;
+}
+
 export interface RotationProbe {
   lossless: boolean;
   reason: string | null;
@@ -281,8 +318,52 @@ export const installModel = (config: AiConfig, model: string) =>
 export const cancelInstall = () => invoke<void>("cancel_install");
 export const uninstallModel = (config: AiConfig, model: string) =>
   invoke<void>("uninstall_model", { config, model });
+export const getSceneFit = (source: string) =>
+  invoke<SceneFitView | null>("get_scene_fit", { source });
+export const setSceneFit = (source: string, fit: SceneFitView) =>
+  invoke<void>("set_scene_fit", { source, fit });
+export const clearSceneFit = (source: string) => invoke<void>("clear_scene_fit", { source });
+export const fitSceneWithModel = (source: string) =>
+  invoke<SceneGuessView>("fit_scene_with_model", { source });
+export const depthModelStatus = () => invoke<DepthModelStatus>("depth_model_status");
+export const installDepthModel = () => invoke<void>("install_depth_model");
+export const cancelDepthInstall = () => invoke<void>("cancel_depth_install");
+export const estimateDepth = (source: string, edge: number) =>
+  invoke<DepthGridView>("estimate_depth", { source, edge });
 export const readWithModel = (source: string) =>
   invoke<ReadingView>("read_with_model", { source });
+
+export interface FillRequest {
+  endpoint: string;
+  key: string;
+  model: string;
+  prompt: string;
+  size: string;
+  image: string;
+  mask: string;
+}
+
+export const fillWithService = (request: FillRequest) =>
+  invoke<string>("fill_with_service", { request });
+
+export interface DiffuseModelStatus {
+  present: boolean;
+  bytes: number;
+  total: number;
+  built_in: boolean;
+}
+
+export interface PaintRequest {
+  prompt: string;
+  steps: number;
+  image: string;
+  mask: string;
+}
+
+export const diffuseModelStatus = () => invoke<DiffuseModelStatus>("diffuse_model_status");
+export const installDiffuseModel = () => invoke<void>("install_diffuse_model");
+export const cancelDiffuseInstall = () => invoke<void>("cancel_diffuse_install");
+export const fillHere = (request: PaintRequest) => invoke<string>("fill_here", { request });
 
 export function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];

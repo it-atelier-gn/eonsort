@@ -117,17 +117,125 @@ Click to take the mouse, then <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> t
 <kbd>Shift</kbd> to run, and the mouse to look. Look at any picture and its name and date appear;
 click or press <kbd>E</kbd> to open it in the preview pane. <kbd>Esc</kbd> gives the mouse back.
 
+### Walking into a single picture
+
+The **Scene** tab takes one photograph and turns it into a room you can walk around inside.
+
+A photograph is a pinhole camera's view of a space, so the space can be read back out of it. Mark
+the point where the picture recedes — the far end of a corridor, the vanishing point of a street —
+and the rectangle of the furthest wall facing you, and eonsort projects the picture onto a five-sided
+box: back wall, floor, ceiling and two side walls. Walk forward and the walls slide past you with
+the parallax they had when the shutter opened.
+
+The first fit is only a guess. Drag the yellow cross onto the vanishing point and the four blue
+corners onto the far wall, and the room rebuilds as you drag. The dashed guides run from the corners
+of the picture to the corners of the wall, so you can line them up with anything in the photograph
+that recedes. The **lens** slider sets how wide the taking lens was, **Reset** returns to the guess,
+and **Flat** collapses the box to a picture wall with a floor — the honest answer for a portrait or
+a close-up, which has no perspective to walk into.
+
+The room's size is read off the assumption that the photographer's eye was 1.7 m above the floor, so
+walking speed and head height feel right without anything to tune. The plaque gives the room's depth,
+width and height; if the fit produces something barely walkable it says so rather than refusing.
+
+Press **Walk in** to take the mouse, then <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move,
+<kbd>Shift</kbd> to run, and the mouse to look. <kbd>Esc</kbd> steps back out to the fitting view.
+Before you move, the view is the photograph itself. The filmstrip along the bottom switches pictures
+and keeps the preview pane in step.
+
+Your fit is remembered per picture in a `*.scenes.json` file beside the plan, so a room you took
+trouble over is still there when you come back. **Reset** forgets it again.
+
+If the local model is switched on, **Ask the model** hands it the picture and asks where the
+perspective goes and what is standing in front of it. The answer is only ever a starting point —
+it fills in the handles and leaves you in the fitting view to correct it. A vision model reads
+bounding boxes well and vanishing points badly, so expect to drag.
+
+Anything the model finds standing on the visible floor can be shown as a **cut-out**: a piece of the
+photograph standing up in the room with a contact shadow, which you walk around instead of through.
+This is off by default and honestly imperfect — without a cut-out mask the subject also stays
+painted on the floor and wall behind it, so you see it twice. The app says so on screen rather than
+pretending otherwise.
+
+#### Real depth, optionally
+
+The box is a guess about a room. A build made with the optional `depth` feature can do better:
+**Read depth** runs [Depth Anything V2](https://depth-anything-v2.github.io/) locally and turns the
+photograph into a displaced mesh, so a face really does stand out from the wall behind it. The
+**relief** slider fades between the flat box and the full displacement.
+
+At the edges of a foreground object the mesh has nothing behind it to show, so those triangles are
+dropped. The **fill** control decides what you see through the gap, and offers four answers:
+
+| fill | What happens |
+|---|---|
+| `nearest` | The background is carried a short way behind each near edge — colour and distance both — and drawn as a second layer, so a head no longer has the flat wall showing through beside it. No model, no network, instant. |
+| `service` | The carried band is sent to an image-editing endpoint that speaks OpenAI's `/v1/images/edits`, which paints what was hidden. Press **Fill** to run it. |
+| `local` | The same band, painted in-process by Stable Diffusion 1.5 inpainting. Needs the optional `diffuse` feature and its weights. |
+| `none` | The gap is left open, which is what earlier builds did. |
+
+`service` shows four settings, remembered between sessions: **endpoint** (a bare host gains
+`/v1/images/edits`; `http://localhost:8080` reaches most local servers, and Automatic1111's reply
+shape is understood too), **key** (leave empty for a local server), **model**, and **size**. `local`
+shows only a **prompt**. Both are given the picture with the torn band cut out as transparency, and
+both are asked to invent only what the band covers.
+
+Both painters supply *colour only*. The distances in the band stay the propagated background, so a
+painted patch never invents geometry — it just stops the flat room showing through. Step far enough
+sideways and it does anyway.
+
+One honest limit remains. The depth is *relative*, not measured in metres — it says what is nearer,
+not how far.
+
+This is off the beaten path deliberately. It adds a large dependency and roughly 190 MB of model
+weights, so it is not in the default build:
+
+```sh
+cargo tauri build --features depth      # or: cargo build -p eonsort-desktop --features depth
+```
+
+The weights download on first use into `models/` inside the app data folder — delete that folder to
+get the space back — from pinned revisions of
+[`lmz/candle-dino-v2`](https://huggingface.co/lmz/candle-dino-v2) and
+[`jeroenvlek/depth-anything-v2-safetensors`](https://huggingface.co/jeroenvlek/depth-anything-v2-safetensors).
+Inference runs on the CPU and takes a second or two per picture. A build without the feature says so
+plainly instead of offering a button that cannot work.
+
+The `service` fill needs no feature and no weights — only a reachable endpoint. The `local` fill
+needs a second optional feature, which brings the diffusion model in alongside the depth one:
+
+```sh
+cargo tauri build --features "depth diffuse"
+```
+
+**Get painting model** downloads about 2.1 GB into the same `models/` folder, from pinned revisions
+of [`stable-diffusion-v1-5/stable-diffusion-inpainting`](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-inpainting)
+and the CLIP tokenizer from
+[`openai/clip-vit-base-patch32`](https://huggingface.co/openai/clip-vit-base-patch32). Be plain
+about the cost: twenty denoising steps at 512×512 on a CPU take **minutes**, not seconds. A machine
+without a lot of patience should use `nearest`, or point `service` at something with a GPU.
+
 The **Charts** tab answers the same questions in flat 2D, which is often quicker to read:
 
 | Figure | The question it answers |
 |---|---|
-| **When your files were made** | A square per month, year by year. Where are the gaps, and is anything stranded far from the rest? |
+| **When your files were made** | A square per month, year by year. Where are the gaps, and is anything stranded far from the rest? Click into it to go finer. |
 | **Time of day** | Do the hours look like a camera roll? A spike at midnight means those files carry a date with no time. |
 | **Where each date came from** | Which source was trusted. A large "file system" share means many dates are really copy dates. |
 | **How sure eonsort is** | The same four colours the timeline uses, with what each one actually means. |
 | **Where the bulk lands** | The fullest destination folders — one outsized folder is usually where unknown dates collected. |
 
 Every figure says in one line what it shows and what is worth noticing in it.
+
+**Digging into a stretch of time.** The first figure is also the way in. Click a square to drop into
+it, drag across squares to take an arbitrary range, or click the label on the left for a whole row —
+and the grid gets finer as you go: months of the years, then days of a month, then hours of a day.
+
+Whatever you pick becomes the scope for the whole app. Every other figure recounts itself for it, and
+the **Timeline**, **Gallery** and **Scene** tabs show only those files, so you can spot an odd
+fortnight in the heat map and then walk through exactly those pictures. A bar under the toolbar
+tracks where you are — `All time › 2019 › Mar 2019` — with each step clickable to come back up, plus
+**Back** and **Show all**. Scanning again clears it.
 
 Your corrections live in a `*.overrides.json` file beside the plan. They survive reopening the plan,
 they are what the copy actually uses, and you can undo any of them. Nothing rewrites the plan
@@ -282,7 +390,7 @@ src                   the SvelteKit front end
 
 A **plan** is a JSON Lines file: one header record, then one record per file describing where it came from, every date each source reported, anything that looks wrong about the one that was chosen, and where the file will go. The copy step reads the plan and writes its own journal next to it. Both files are append-only, which is what makes every phase restartable.
 
-Date corrections are kept out of the plan, in a `*.overrides.json` sidecar beside it, so the record of what was *detected* is never overwritten by what you *decided*. Rotations you make by hand live the same way in `*.rotations.json`. Everything that loads a plan by path applies the sidecars, so the desktop app and the command line agree on where a file goes and which way up it lands.
+Date corrections are kept out of the plan, in a `*.overrides.json` sidecar beside it, so the record of what was *detected* is never overwritten by what you *decided*. Rotations you make by hand live the same way in `*.rotations.json`, and the rooms you fit to a photograph in `*.scenes.json`. Everything that loads a plan by path applies the sidecars, so the desktop app and the command line agree on where a file goes and which way up it lands.
 
 Turning a picture changes its bytes, so the copy records the size and hash of what it actually wrote into the journal. `verify` compares a turned copy against that record rather than against the source, and the duplicate check does the same — running a copy twice recognises the turned file instead of writing it again as `name_dup_1.jpg`.
 
@@ -295,6 +403,18 @@ Contributions are welcome. For substantial changes, open an issue first to discu
 ```sh
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && npm run check && npm test
 ```
+
+The optional `depth` and `diffuse` features are not part of that line, and CI only checks them in a
+separate non-blocking job. If you touch `crates/eonsort-core/src/depth.rs` or
+`crates/eonsort-core/src/diffuse.rs`, build them yourself:
+
+```sh
+cargo clippy -p eonsort-core --features depth --all-targets -- -D warnings && cargo test -p eonsort-core --features depth
+cargo clippy -p eonsort-core --features diffuse --all-targets -- -D warnings && cargo test -p eonsort-core --features diffuse
+```
+
+`crates/eonsort-core/src/inpaint.rs` — the `service` fill — needs no feature and is covered by the
+default line above.
 
 The application icon is generated rather than hand-drawn. To change it, edit `scripts/make-icon.mjs` and run `npm run icon`.
 

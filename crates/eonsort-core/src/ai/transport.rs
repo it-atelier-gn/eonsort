@@ -52,33 +52,6 @@ pub fn vision(config: &AiConfig, image_base64: &str, instruction: &str) -> Resul
     }
 }
 
-pub fn embed(config: &AiConfig, text: &str) -> Result<Vec<f32>> {
-    let (path, body, pointer) = match config.api {
-        Api::Ollama => (
-            "/api/embeddings",
-            json!({"model": config.embed_model, "prompt": text}),
-            "/embedding",
-        ),
-        Api::OpenAi => (
-            "/v1/embeddings",
-            json!({"model": config.embed_model, "input": text}),
-            "/data/0/embedding",
-        ),
-    };
-
-    let answer = post(config, path, body)?;
-    let values = answer
-        .pointer(pointer)
-        .and_then(Value::as_array)
-        .ok_or_else(|| Error::Ai(format!("unexpected embedding shape: {answer}")))?;
-
-    Ok(values
-        .iter()
-        .filter_map(Value::as_f64)
-        .map(|v| v as f32)
-        .collect())
-}
-
 pub fn probe(config: &AiConfig) -> Result<Vec<String>> {
     if !config.usable() {
         return Err(Error::AiDisabled);

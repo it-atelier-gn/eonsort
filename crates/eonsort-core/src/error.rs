@@ -55,6 +55,18 @@ pub enum Error {
 
     #[error("{0}")]
     Ai(String),
+
+    #[error("{0}")]
+    Depth(String),
+
+    #[error("{0}")]
+    Upright(String),
+
+    #[error("{0}")]
+    Diffuse(String),
+
+    #[error("{0}")]
+    Download(String),
 }
 
 impl Error {

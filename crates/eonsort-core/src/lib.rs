@@ -1,18 +1,24 @@
 pub mod ai;
 pub mod copy;
 pub mod dateparse;
+pub mod depth;
+pub mod diffuse;
 pub mod error;
 pub mod exif_write;
+pub mod inpaint;
 pub mod model;
 pub mod overrides;
 pub mod plan;
 pub mod providers;
 pub mod rotate;
 pub mod scan;
-pub mod search;
+pub mod scenes;
 pub mod similar;
 pub mod suspect;
+pub mod upright;
 pub mod verify;
+pub mod weights;
+pub mod yolo;
 
 pub use ai::{AiConfig, Api as AiApi, Client as AiClient, Reading};
 pub use error::{Error, Result};

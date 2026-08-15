@@ -56,6 +56,8 @@ pub struct PlanEntry {
     #[serde(default)]
     pub rotate: Transform,
     #[serde(default)]
+    pub rotate_reason: Option<String>,
+    #[serde(default)]
     pub reencode: bool,
 }
 
@@ -75,6 +77,7 @@ impl Default for PlanEntry {
             caption: None,
             orientation: 0,
             rotate: Transform::None,
+            rotate_reason: None,
             reencode: false,
         }
     }
