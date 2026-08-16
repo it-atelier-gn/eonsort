@@ -12,12 +12,14 @@ default = []
 download = ["ureq/rustls"]
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
 upright = ["candle", "download"]
+tagging = ["candle", "download", "dep:tokenizers"]
 
 [dependencies]
 base64.workspace = true
 candle-core = { workspace = true, optional = true }
 candle-nn = { workspace = true, optional = true }
 candle-transformers = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
 blake3.workspace = true
 chrono.workspace = true
 filetime.workspace = true

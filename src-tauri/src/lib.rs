@@ -42,6 +42,13 @@ pub fn run() {
             commands::install_upright_model,
             commands::cancel_upright_install,
             commands::guess_upright,
+            commands::tag_model_status,
+            commands::install_tag_model,
+            commands::cancel_tag_install,
+            commands::start_tagging,
+            commands::cancel_tagging,
+            commands::list_tags,
+            commands::search_pictures,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the application");

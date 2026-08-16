@@ -1,5 +1,14 @@
 <script lang="ts">
+  import { onDestroy, onMount } from "svelte";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { open } from "@tauri-apps/plugin-dialog";
+  import {
+    cancelTagInstall,
+    formatBytes,
+    installTagModel,
+    tagModelStatus,
+    type TagModelStatus,
+  } from "$lib/api";
   import type { Provider, Settings, Strategy } from "$lib/api";
 
   interface Props {
@@ -17,6 +26,52 @@
     { id: "media", label: "Media", hint: "Recording time in videos" },
     { id: "filesystem", label: "File system", hint: "Created / modified time" },
   ];
+
+  let tagModel = $state<TagModelStatus | null>(null);
+  let fetchingTags = $state(false);
+  let fetched = $state<{ completed: number; total: number } | null>(null);
+  let tagError = $state<string | null>(null);
+  let stops: UnlistenFn[] = [];
+
+  onMount(async () => {
+    await refreshTagModel();
+    stops = await Promise.all([
+      listen<{ completed: number; total: number }>("tags:fetch", (e) => (fetched = e.payload)),
+      listen<number>("tags:fetched", async () => {
+        fetchingTags = false;
+        fetched = null;
+        await refreshTagModel();
+      }),
+      listen<string>("tags:error", async (e) => {
+        if (!fetchingTags) return;
+        fetchingTags = false;
+        fetched = null;
+        tagError = e.payload === "cancelled" ? "Download stopped." : e.payload;
+        await refreshTagModel();
+      }),
+    ]);
+  });
+
+  onDestroy(() => stops.forEach((stop) => stop()));
+
+  async function refreshTagModel() {
+    try {
+      tagModel = await tagModelStatus();
+    } catch {
+      tagModel = null;
+    }
+  }
+
+  async function getTagModel() {
+    tagError = null;
+    fetchingTags = true;
+    try {
+      await installTagModel();
+    } catch (e) {
+      fetchingTags = false;
+      tagError = String(e);
+    }
+  }
 
   const STRATEGIES: { id: Strategy; label: string; hint: string }[] = [
     {
@@ -199,6 +254,47 @@
     <label class="check">
       <input
         type="checkbox"
+        checked={settings.tag_pictures}
+        disabled={busy}
+        onchange={(e) => onChange({ ...settings, tag_pictures: e.currentTarget.checked })}
+      />
+      <span>Look at pictures and tag them after a scan</span>
+    </label>
+    <p class="faint hint">
+      Runs in the background once the scan has finished, so it never holds the scan up. Tags show in
+      the preview, and the search box finds pictures by what is in them.
+    </p>
+    {#if settings.tag_pictures}
+      <div class="model-line">
+        {#if tagModel && !tagModel.built_in}
+          <span class="faint tiny">This build was made without the tagging model.</span>
+        {:else if tagModel?.present}
+          <span class="faint tiny">
+            Tagging model ready · {formatBytes(tagModel.total)}
+          </span>
+        {:else if fetchingTags}
+          <button class="ghost" onclick={() => void cancelTagInstall()}>
+            {fetched
+              ? `Stop (${formatBytes(fetched.completed)} of ${formatBytes(fetched.total)})`
+              : "Stop"}
+          </button>
+        {:else if tagModel}
+          <button
+            disabled={busy}
+            onclick={getTagModel}
+            title="Downloads about 780 MB of model weights, once"
+          >
+            Get the tagging model
+          </button>
+        {/if}
+      </div>
+      {#if tagError}
+        <p class="hint error">{tagError}</p>
+      {/if}
+    {/if}
+    <label class="check">
+      <input
+        type="checkbox"
         checked={settings.compare_hashes}
         disabled={busy}
         onchange={(e) => onChange({ ...settings, compare_hashes: e.currentTarget.checked })}
@@ -283,6 +379,13 @@
   .checks {
     display: grid;
     gap: 4px;
+  }
+
+  .model-line {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .check {

@@ -96,6 +96,23 @@ jobs:
       - run: cargo clippy -p eonsort-core --features upright --all-targets -- -D warnings
       - run: cargo test -p eonsort-core --features upright
 
+  tagging:
+    name: Tagging feature
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm
+      - run: cargo clippy -p eonsort-core --features tagging --all-targets -- -D warnings
+      - run: cargo test -p eonsort-core --features tagging
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest

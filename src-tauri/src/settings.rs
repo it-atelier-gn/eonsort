@@ -16,6 +16,8 @@ pub struct Settings {
     pub strategy: Strategy,
     pub follow_symlinks: bool,
     pub auto_rotate: bool,
+    #[serde(default)]
+    pub tag_pictures: bool,
     pub jobs: usize,
     pub preserve_times: bool,
     pub compare_hashes: bool,
@@ -32,6 +34,7 @@ impl Default for Settings {
             strategy: Strategy::default(),
             follow_symlinks: false,
             auto_rotate: false,
+            tag_pictures: false,
             jobs: eonsort_core::copy::default_concurrency(),
             preserve_times: true,
             compare_hashes: false,

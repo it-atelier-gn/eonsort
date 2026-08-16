@@ -9,7 +9,12 @@
     clearRotation,
     formatBytes,
     getSettings,
+    cancelTagging,
     listAllEntries,
+    listTags,
+    searchPictures,
+    startTagging,
+    tagModelStatus,
     listFolders,
     listSkipped,
     listSuspects,
@@ -34,6 +39,8 @@
     type PlanSummary,
     type Preview,
     type Provider,
+    type TagHit,
+    type TagProgress,
     type ScanProgress,
     type Settings,
     type SkippedView,
@@ -77,6 +84,13 @@
   let view = $state<"folders" | "timeline" | "charts" | "gallery">("folders");
   let timelineEntries = $state<EntryView[]>([]);
   let loadingAll = $state(false);
+  let tagProgress = $state<TagProgress | null>(null);
+  let tagging = $state(false);
+  let tagNote = $state<string | null>(null);
+  let tagsBySource = $state<Record<string, string[]>>({});
+  let query = $state("");
+  let hits = $state<TagHit[] | null>(null);
+  let searching = $state(false);
   let scopes = $state<TimeRange[]>([]);
 
   let job = $state<Job | null>(null);
@@ -135,7 +149,20 @@
     skipped.length + copyFailures.length + (verifyReport?.issues.length ?? 0) + suspects.length,
   );
   const scope = $derived<TimeRange | null>(scopes[scopes.length - 1] ?? null);
-  const scopedEntries = $derived(filterRange(timelineEntries, scope));
+  const taggedEntries = $derived(
+    timelineEntries.map((entry) => {
+      const seen = tagsBySource[entry.source];
+      return seen && seen.length > 0 ? { ...entry, tags: seen } : entry;
+    }),
+  );
+  const foundEntries = $derived(
+    hits === null
+      ? taggedEntries
+      : hits
+          .map((hit) => taggedEntries.find((entry) => entry.source === hit.source))
+          .filter((entry): entry is EntryView => entry !== undefined),
+  );
+  const scopedEntries = $derived(filterRange(foundEntries, scope));
   const entries = $derived(under(scopedEntries, selectedFolder));
   const markedEntries = $derived(entries.filter((entry) => marked.includes(entry.source)));
 
@@ -181,8 +208,20 @@
         summary = e.payload;
         notice = `Planned ${e.payload.files} files into ${e.payload.folders} folders.`;
         await refreshTree(true);
+        if (settings?.tag_pictures) void beginTagging();
       }),
       listen<string>("scan:error", (e) => fail(e.payload)),
+      listen<TagProgress>("tags:progress", (e) => (tagProgress = e.payload)),
+      listen<number>("tags:done", async () => {
+        tagProgress = null;
+        tagging = false;
+        await refreshTags();
+      }),
+      listen<string>("tags:error", (e) => {
+        tagProgress = null;
+        tagging = false;
+        tagNote = e.payload;
+      }),
       listen<CopyProgress>("copy:progress", (e) => (copyProgress = e.payload)),
       listen<{ report: CopyReport }>("copy:done", async (e) => {
         job = null;
@@ -247,6 +286,56 @@
     }
   }
 
+  async function beginTagging() {
+    tagNote = null;
+    try {
+      const status = await tagModelStatus();
+      if (!status.built_in) {
+        tagNote = "This build was made without the tagging model.";
+        return;
+      }
+      if (!status.present) {
+        tagNote = "The tagging model is not downloaded yet — get it in the setup panel.";
+        return;
+      }
+      tagging = true;
+      await startTagging();
+    } catch (e) {
+      tagging = false;
+      tagNote = String(e);
+    }
+  }
+
+  async function refreshTags() {
+    try {
+      tagsBySource = await listTags();
+    } catch {
+      tagsBySource = {};
+    }
+  }
+
+  async function look() {
+    const words = query.trim();
+    if (words === "") {
+      hits = null;
+      return;
+    }
+    searching = true;
+    try {
+      hits = await searchPictures(words);
+    } catch (e) {
+      tagNote = String(e);
+      hits = null;
+    } finally {
+      searching = false;
+    }
+  }
+
+  function clearSearch() {
+    query = "";
+    hits = null;
+  }
+
   async function refreshTree(reset: boolean) {
     folders = await listFolders();
     loadingAll = true;
@@ -255,6 +344,7 @@
     } finally {
       loadingAll = false;
     }
+    await refreshTags();
     skipped = await listSkipped();
     suspects = await listSuspects();
     if (reset) {
@@ -538,6 +628,23 @@
         <button class:active={view === "charts"} onclick={() => showAll("charts")}>Charts</button>
         <button class:active={view === "gallery"} onclick={() => showAll("gallery")}>Gallery</button>
       </div>
+      <div class="look">
+        <input
+          type="search"
+          placeholder="forest and dog"
+          bind:value={query}
+          onkeydown={(e) => {
+            if (e.key === "Enter") void look();
+            if (e.key === "Escape") clearSearch();
+          }}
+        />
+        <button onclick={() => void look()} disabled={searching || query.trim() === ""}>
+          {searching ? "Looking…" : "Find"}
+        </button>
+        {#if hits !== null}
+          <button class="ghost" onclick={clearSearch}>Clear</button>
+        {/if}
+      </div>
       <button class="primary" onclick={scan} disabled={!canScan}>Scan</button>
       <button onclick={copy} disabled={!canRun} title={runHint}>Copy files</button>
       <button onclick={check} disabled={!canRun} title={runHint}>Check result</button>
@@ -546,6 +653,24 @@
       {/if}
     </div>
   </header>
+
+  {#if tagProgress || tagNote || hits !== null}
+    <div class="tagbar faint tiny">
+      {#if tagProgress}
+        <span class="spinner"></span>
+        <span>
+          Looking at pictures — {tagProgress.done.toLocaleString()} of {tagProgress.total.toLocaleString()}
+        </span>
+        <button class="ghost" onclick={() => void cancelTagging()}>Stop</button>
+      {:else if hits !== null}
+        <span>{hits.length.toLocaleString()} pictures match &ldquo;{query.trim()}&rdquo;</span>
+        <button class="ghost" onclick={clearSearch}>Show all again</button>
+      {/if}
+      {#if tagNote}
+        <span>{tagNote}</span>
+      {/if}
+    </div>
+  {/if}
 
   {#if scopes.length > 0}
     <ScopeBar
@@ -799,6 +924,24 @@
     border-color: var(--accent);
     background: var(--bg-active);
     color: var(--text);
+  }
+
+  .look {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .look input {
+    width: 190px;
+  }
+
+  .tagbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    border-bottom: 1px solid var(--border);
   }
 
   .tree {

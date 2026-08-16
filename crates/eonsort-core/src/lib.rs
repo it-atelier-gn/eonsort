@@ -10,6 +10,8 @@ pub mod rotate;
 pub mod scan;
 pub mod similar;
 pub mod suspect;
+pub mod tagging;
+pub mod tags;
 pub mod upright;
 pub mod verify;
 pub mod weights;

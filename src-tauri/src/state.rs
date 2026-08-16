@@ -21,6 +21,9 @@ pub struct AppState {
     pub cancel: Arc<AtomicBool>,
     pub upright_cancel: Arc<AtomicBool>,
     pub fetching_upright: Mutex<bool>,
+    pub tag_cancel: Arc<AtomicBool>,
+    pub fetching_tags: Mutex<bool>,
+    pub tagging: Mutex<bool>,
 }
 
 impl Default for AppState {
@@ -30,6 +33,9 @@ impl Default for AppState {
             cancel: Arc::new(AtomicBool::new(false)),
             upright_cancel: Arc::new(AtomicBool::new(false)),
             fetching_upright: Mutex::new(false),
+            tag_cancel: Arc::new(AtomicBool::new(false)),
+            fetching_tags: Mutex::new(false),
+            tagging: Mutex::new(false),
         }
     }
 }

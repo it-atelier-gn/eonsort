@@ -12,18 +12,22 @@ use eonsort_core::rotate::{self, Transform};
 use eonsort_core::scan::{ScanOptions, ScanProgress};
 use eonsort_core::similar;
 use eonsort_core::suspect::{self, EntryFacts, Flag};
+use eonsort_core::tagging;
+use eonsort_core::tags;
 use eonsort_core::upright;
 use eonsort_core::verify::{VerifyOptions, VerifyProgress, VerifyReport};
 use eonsort_core::{default_plan_name, read_plan, validate_folder_pattern, Plan};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(60);
+const TAG_BATCH: usize = 40;
+const SEARCH_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScanRequest {
@@ -1022,6 +1026,272 @@ pub async fn guess_upright(app: AppHandle, source: PathBuf) -> Result<UprightGue
         reason: guess.reason,
     })
     .map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TagModelStatus {
+    pub present: bool,
+    pub bytes: u64,
+    pub total: u64,
+    pub built_in: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TagProgressView {
+    pub done: usize,
+    pub total: usize,
+    pub current: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TagHit {
+    pub source: String,
+    pub score: f32,
+}
+
+#[tauri::command]
+pub fn tag_model_status(app: AppHandle) -> Result<TagModelStatus, String> {
+    let dir = models_directory(&app)?;
+    Ok(TagModelStatus {
+        present: tagging::installed(&dir),
+        bytes: tagging::present_bytes(&dir),
+        total: tagging::total_bytes(),
+        built_in: cfg!(feature = "tagging"),
+    })
+}
+
+#[tauri::command]
+pub fn install_tag_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if !cfg!(feature = "tagging") {
+        return Err("this build was made without the tagging model".into());
+    }
+
+    {
+        let mut fetching = state.fetching_tags.lock().unwrap();
+        if *fetching {
+            return Err("the tagging model is already downloading".into());
+        }
+        *fetching = true;
+    }
+
+    state.tag_cancel.store(false, Ordering::Relaxed);
+    let dir = models_directory(&app)?;
+    let handle = app.clone();
+
+    std::thread::spawn(move || {
+        let state = handle.state::<AppState>();
+        let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
+
+        let result = tagging::download(
+            &dir,
+            &state.tag_cancel,
+            &|progress: tagging::TagProgress| {
+                emit_throttled(&handle, "tags:fetch", &progress, &throttle);
+            },
+        );
+        *state.fetching_tags.lock().unwrap() = false;
+
+        match result {
+            Ok(()) => {
+                let _ = handle.emit("tags:fetched", tagging::present_bytes(&dir));
+            }
+            Err(err) => {
+                let _ = handle.emit("tags:error", err.to_string());
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_tag_install(state: State<'_, AppState>) {
+    state.tag_cancel.store(true, Ordering::Relaxed);
+}
+
+#[tauri::command]
+pub fn cancel_tagging(state: State<'_, AppState>) {
+    state.tag_cancel.store(true, Ordering::Relaxed);
+}
+
+fn tag_store(app: &AppHandle) -> Option<PathBuf> {
+    let state = app.state::<AppState>();
+    let session = state.session.lock().unwrap();
+    session.plan_path.as_deref().map(tags::tags_path)
+}
+
+#[tauri::command]
+pub fn list_tags(app: AppHandle) -> Result<HashMap<String, Vec<String>>, String> {
+    let Some(path) = tag_store(&app) else {
+        return Ok(HashMap::new());
+    };
+    let stored = tags::read(&path).map_err(|e| e.to_string())?;
+    Ok(stored
+        .0
+        .into_iter()
+        .map(|(source, sighting)| (source.to_string_lossy().into_owned(), sighting.tags))
+        .collect())
+}
+
+#[tauri::command]
+pub fn start_tagging(app: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
+    if !cfg!(feature = "tagging") {
+        return Err("this build was made without the tagging model".into());
+    }
+
+    let dir = models_directory(&app)?;
+    if !tagging::installed(&dir) {
+        return Err("the tagging model is not downloaded yet".into());
+    }
+
+    let Some(store) = tag_store(&app) else {
+        return Err("run a scan first".into());
+    };
+
+    let pictures: Vec<PathBuf> = {
+        let session = state.session.lock().unwrap();
+        let Some(plan) = &session.plan else {
+            return Err("run a scan first".into());
+        };
+        plan.entries
+            .iter()
+            .filter(|entry| is_picture(&entry.source))
+            .map(|entry| entry.source.clone())
+            .collect()
+    };
+
+    {
+        let mut running = state.tagging.lock().unwrap();
+        if *running {
+            return Err("the pictures are already being looked at".into());
+        }
+        *running = true;
+    }
+
+    state.tag_cancel.store(false, Ordering::Relaxed);
+    let handle = app.clone();
+    let wanted = pictures.len();
+
+    std::thread::spawn(move || {
+        let state = handle.state::<AppState>();
+        let result = tag_everything(&handle, &dir, &store, pictures, &state.tag_cancel);
+        *state.tagging.lock().unwrap() = false;
+
+        match result {
+            Ok(seen) => {
+                let _ = handle.emit("tags:done", seen);
+            }
+            Err(err) => {
+                let _ = handle.emit("tags:error", err);
+            }
+        }
+    });
+
+    Ok(wanted)
+}
+
+fn tag_everything(
+    app: &AppHandle,
+    dir: &Path,
+    store: &Path,
+    pictures: Vec<PathBuf>,
+    cancel: &AtomicBool,
+) -> Result<usize, String> {
+    let tagger = tagging::Tagger::load(dir).map_err(|e| e.to_string())?;
+    let mut stored = tags::read(store).map_err(|e| e.to_string())?;
+    stored.keep_only(&pictures);
+
+    let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
+    let total = pictures.len();
+    let mut since_written = 0usize;
+
+    for (seen, source) in pictures.into_iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let done = seen + 1;
+
+        if stored.get(&source).is_some() {
+            continue;
+        }
+
+        emit_throttled(
+            app,
+            "tags:progress",
+            &TagProgressView {
+                done,
+                total,
+                current: Some(source.to_string_lossy().into_owned()),
+            },
+            &throttle,
+        );
+
+        match tagger.look(&source) {
+            Ok(seen) => {
+                stored.set(
+                    source,
+                    tags::Sighting {
+                        tags: seen.tags,
+                        vector: seen.vector,
+                    },
+                );
+                since_written += 1;
+            }
+            Err(_) => continue,
+        }
+
+        if since_written >= TAG_BATCH {
+            tags::write(store, &stored).map_err(|e| e.to_string())?;
+            since_written = 0;
+        }
+    }
+
+    tags::write(store, &stored).map_err(|e| e.to_string())?;
+    Ok(stored.len())
+}
+
+#[tauri::command]
+pub async fn search_pictures(app: AppHandle, words: String) -> Result<Vec<TagHit>, String> {
+    let Some(store) = tag_store(&app) else {
+        return Ok(Vec::new());
+    };
+    if words.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let dir = models_directory(&app)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let stored = tags::read(&store).map_err(|e| e.to_string())?;
+        let wanted = if cfg!(feature = "tagging") && tagging::installed(&dir) {
+            tagging::Tagger::load(&dir)
+                .and_then(|tagger| tagger.phrase(&words))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        Ok(tags::search(&stored, &wanted, &words)
+            .into_iter()
+            .take(SEARCH_LIMIT)
+            .map(|(source, score)| TagHit {
+                source: source.to_string_lossy().into_owned(),
+                score,
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn is_picture(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some("jpg" | "jpeg" | "jpe" | "png" | "webp" | "bmp" | "tif" | "tiff" | "gif")
+    )
 }
 
 fn view(

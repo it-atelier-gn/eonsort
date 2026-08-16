@@ -12,6 +12,7 @@ export interface Settings {
   strategy: Strategy;
   follow_symlinks: boolean;
   auto_rotate: boolean;
+  tag_pictures: boolean;
   jobs: number;
   preserve_times: boolean;
   compare_hashes: boolean;
@@ -238,6 +239,32 @@ export const rotateMarked = (sources: string[], quarterTurns: number) =>
 export const probeRotation = (source: string) =>
   invoke<RotationProbe>("probe_rotation", { source });
 export const previewFile = (path: string) => invoke<Preview>("preview_file", { path });
+
+export interface TagModelStatus {
+  present: boolean;
+  bytes: number;
+  total: number;
+  built_in: boolean;
+}
+
+export interface TagProgress {
+  done: number;
+  total: number;
+  current: string | null;
+}
+
+export interface TagHit {
+  source: string;
+  score: number;
+}
+
+export const tagModelStatus = () => invoke<TagModelStatus>("tag_model_status");
+export const installTagModel = () => invoke<void>("install_tag_model");
+export const cancelTagInstall = () => invoke<void>("cancel_tag_install");
+export const startTagging = () => invoke<number>("start_tagging");
+export const cancelTagging = () => invoke<void>("cancel_tagging");
+export const listTags = () => invoke<Record<string, string[]>>("list_tags");
+export const searchPictures = (words: string) => invoke<TagHit[]>("search_pictures", { words });
 export function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;

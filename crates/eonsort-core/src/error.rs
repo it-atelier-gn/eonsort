@@ -51,7 +51,7 @@ pub enum Error {
     Rotation { path: PathBuf, message: String },
 
     #[error("{0}")]
-    Depth(String),
+    Tagging(String),
 
     #[error("{0}")]
     Upright(String),

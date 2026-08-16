@@ -39,6 +39,31 @@ Every source that reports a date is kept. Each can be switched off. Three rules 
 | **Oldest date wins** | Keeps the earliest date any source reports |
 | **First match wins** | Walks the sources in order, stops at the first hit |
 
+## Finding a picture by what is in it
+
+Tick **Look at pictures and tag them after a scan**. Once the scan finishes, eonsort works through
+the pictures in the background — the scan itself is never held up — and gives each one a handful of
+plain tags: *a forest*, *a dog*, *a birthday party*. Tags show in the preview pane.
+
+It also keeps the embedding it computed, so the search box takes ordinary words rather than tag
+names. Type `forest and dog` and press Enter; every view narrows to the pictures that match, ranked
+by how well. **Clear** puts everything back.
+
+The work is [SigLIP](https://huggingface.co/google/siglip-base-patch16-224) running locally on the
+CPU — nothing leaves your machine, and no runner needs hosting. It needs the optional `tagging`
+feature and a one-off download of about 780 MB, offered in the setup panel:
+
+```sh
+cargo tauri build --features tagging
+```
+
+Weights land in `models/` inside the app data folder; delete that folder to reclaim the space.
+Pictures already tagged are skipped when the pass runs again, so a second scan only looks at what is
+new. Without the feature, the search box still works — it falls back to matching your words against
+tags already stored.
+
+Tags live in a `*.tags.json` file beside the plan.
+
 ## When the date is wrong
 
 A camera whose battery died resets its clock to a factory default — usually 1 January of 2000, 2003
@@ -216,11 +241,12 @@ Contributions are welcome. For substantial changes, open an issue first.
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && npm run check && npm test
 ```
 
-The optional `upright` feature is not in that line; CI checks it in a separate non-blocking job. If
-you touch `upright.rs` or `yolo.rs`:
+The optional `upright` and `tagging` features are not in that line; CI checks them in separate
+non-blocking jobs. If you touch `upright.rs`, `yolo.rs` or `tagging.rs`:
 
 ```sh
 cargo clippy -p eonsort-core --features upright --all-targets -- -D warnings && cargo test -p eonsort-core --features upright
+cargo clippy -p eonsort-core --features tagging --all-targets -- -D warnings && cargo test -p eonsort-core --features tagging
 ```
 
 The application icon is generated. To change it, edit `scripts/make-icon.mjs` and run `npm run icon`.
