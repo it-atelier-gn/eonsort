@@ -50,12 +50,6 @@ pub enum Error {
     #[error("{path}: {message}")]
     Rotation { path: PathBuf, message: String },
 
-    #[error("the local model is switched off")]
-    AiDisabled,
-
-    #[error("{0}")]
-    Ai(String),
-
     #[error("{0}")]
     Depth(String),
 

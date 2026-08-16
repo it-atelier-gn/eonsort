@@ -1,4 +1,3 @@
-use crate::ai::{AiConfig, Client};
 use crate::error::{Error, Result};
 use crate::model::{
     destination_root, destination_with_subject, validate_folder_pattern, PlanEntry, PlanHeader,
@@ -28,15 +27,12 @@ pub struct ScanOptions {
     pub detect: DetectOptions,
     pub follow_symlinks: bool,
     #[serde(default)]
-    pub ai: AiConfig,
-    #[serde(default)]
     pub auto_rotate: bool,
     #[serde(default)]
     pub upright_model_dir: Option<PathBuf>,
 }
 
 struct Models<'a> {
-    ai: Option<&'a Client>,
     upright: Option<&'a Detector>,
 }
 
@@ -83,20 +79,11 @@ pub fn scan(
         None => PlanWriter::create(plan_path, &header)?,
     };
 
-    let ai = options
-        .detect
-        .providers
-        .iter()
-        .any(|p| p.needs_model())
-        .then(|| Client::new(options.ai.clone()))
-        .filter(|client| client.config().usable());
-
     let upright = match &options.upright_model_dir {
         Some(dir) => Some(Detector::load(dir)?),
         None => None,
     };
     let models = Models {
-        ai: ai.as_ref(),
         upright: upright.as_ref(),
     };
 
@@ -171,14 +158,14 @@ fn flush_batch(
 }
 
 fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions, models: &Models<'_>) -> PlanRecord {
-    let Some(found) = resolve(path, meta, &options.detect, models.ai) else {
+    let Some(found) = resolve(path, meta, &options.detect) else {
         return PlanRecord::Skipped(SkippedEntry {
             source: path.to_path_buf(),
             reason: "no creation date found".into(),
         });
     };
 
-    let subject = found.reading.as_ref().and_then(|r| r.subject.clone());
+    let subject: Option<String> = None;
 
     let turnable = crate::rotate::lossless_extension(path);
     let orientation = if turnable {
@@ -223,12 +210,8 @@ fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions, models: &Models<
             size: meta.len(),
             candidates: found.candidates,
             flags: found.flags,
-            tags: found
-                .reading
-                .as_ref()
-                .map(|r| r.tags.clone())
-                .unwrap_or_default(),
-            caption: found.reading.as_ref().and_then(|r| r.caption.clone()),
+            tags: Vec::new(),
+            caption: None,
             subject,
             orientation,
             rotate,
@@ -325,7 +308,6 @@ mod tests {
             folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
             detect: DetectOptions::default(),
             follow_symlinks: false,
-            ai: Default::default(),
             auto_rotate: false,
             upright_model_dir: None,
         }

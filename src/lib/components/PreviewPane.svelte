@@ -3,11 +3,9 @@
   import {
     formatBytes,
     probeRotation,
-    readWithModel,
     type DateChoice,
     type EntryView,
     type Preview,
-    type ReadingView,
   } from "$lib/api";
   import { CONFIDENCE_LABEL, CONFIDENCE_TONE, fromInputValue, toInputValue } from "$lib/dates";
   import { TRANSFORM_CSS, canTurn, describeRotation, swapsAxes } from "$lib/rotate";
@@ -17,7 +15,6 @@
     preview: Preview | null;
     loading: boolean;
     busy: boolean;
-    modelReady: boolean;
     onOpen: (path: string) => void;
     onReveal: (path: string) => void;
     onChoose: (choice: DateChoice) => void;
@@ -32,7 +29,6 @@
     preview,
     loading,
     busy,
-    modelReady,
     onOpen,
     onReveal,
     onChoose,
@@ -44,9 +40,6 @@
 
   let manual = $state("");
   let anchored = $state("");
-  let reading = $state<ReadingView | null>(null);
-  let readingError = $state<string | null>(null);
-  let asking = $state(false);
   let lossless = $state<boolean | null>(null);
   let losslessReason = $state<string | null>(null);
 
@@ -54,8 +47,6 @@
     if (entry && entry.source !== anchored) {
       anchored = entry.source;
       manual = toInputValue(entry.taken_epoch);
-      reading = null;
-      readingError = null;
       lossless = null;
       losslessReason = null;
     }
@@ -82,22 +73,6 @@
       losslessReason = "only JPEG pictures can be turned without re-encoding them";
     }
   });
-
-  const canAsk = $derived(
-    modelReady && (preview?.kind === "image" || entry?.name.match(/\.(tiff?|webp|bmp|gif)$/i)),
-  );
-
-  async function ask(source: string) {
-    asking = true;
-    readingError = null;
-    try {
-      reading = await readWithModel(source);
-    } catch (e) {
-      readingError = String(e);
-    } finally {
-      asking = false;
-    }
-  }
 
   const manualIsValid = $derived(fromInputValue(manual) !== null);
 </script>
@@ -243,42 +218,6 @@
           </button>
         {/if}
 
-        {#if canAsk}
-          <button class="ghost ask" disabled={busy || asking} onclick={() => ask(entry.source)}>
-            {asking ? "Looking at the picture…" : "Ask the local model to look"}
-          </button>
-        {/if}
-
-        {#if readingError}
-          <p class="faint note problem">{readingError}</p>
-        {/if}
-
-        {#if reading}
-          <div class="reading">
-            {#if reading.taken}
-              <button
-                class="choice"
-                disabled={busy}
-                onclick={() => onChoose({ kind: "manual", taken: reading!.taken! })}
-              >
-                <span class="who">in the picture</span>
-                <span class="mono when">{reading.taken}</span>
-                <span class="faint note truncate">
-                  {reading.source ?? "read from the image"}{reading.confident ? "" : " · unsure"}
-                </span>
-              </button>
-            {:else}
-              <p class="faint note">No date is legible in this picture.</p>
-            {/if}
-
-            {#if reading.caption}
-              <p class="faint note caption">{reading.caption}</p>
-            {/if}
-            {#if reading.tags.length > 0}
-              <p class="faint note">{reading.tags.join(" · ")}</p>
-            {/if}
-          </div>
-        {/if}
       </section>
 
       <dl>
@@ -286,7 +225,7 @@
         <dd>{entry.provider}{entry.provider_info ? ` · ${entry.provider_info}` : ""}</dd>
 
         {#if entry.subject || entry.tags.length > 0}
-          <dt>The model saw</dt>
+          <dt>Tags</dt>
           <dd>{[entry.subject, ...entry.tags].filter(Boolean).join(" · ")}</dd>
         {/if}
 
@@ -521,20 +460,6 @@
   .ask {
     margin-top: 10px;
     width: 100%;
-  }
-
-  .reading {
-    margin-top: 8px;
-    display: grid;
-    gap: 4px;
-  }
-
-  .reading .note {
-    grid-column: 1;
-  }
-
-  .caption {
-    line-height: 1.4;
   }
 
   .problem {

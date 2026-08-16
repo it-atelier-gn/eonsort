@@ -516,7 +516,6 @@ mod tests {
                 folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
                 detect: DetectOptions::default(),
                 follow_symlinks: false,
-                ai: Default::default(),
                 auto_rotate: false,
                 upright_model_dir: None,
             };
@@ -539,7 +538,6 @@ mod tests {
                 folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
                 detect: DetectOptions::default(),
                 follow_symlinks: false,
-                ai: Default::default(),
                 auto_rotate: true,
                 upright_model_dir: None,
             };

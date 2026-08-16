@@ -39,19 +39,6 @@ Every source that reports a date is kept. Each can be switched off. Three rules 
 | **Oldest date wins** | Keeps the earliest date any source reports |
 | **First match wins** | Walks the sources in order, stops at the first hit |
 
-### The optional local model
-
-A fifth source reads the date **printed into the picture** — a film camera's corner stamp, a date on
-a scanned document. It needs a model runner you host, so nothing leaves your machine.
-
-Point eonsort at [Ollama](https://ollama.com) or any OpenAI-compatible endpoint and press **Check
-connection**. With Ollama, **Download** pulls a model with a progress bar and a **Stop** button, and
-**Remove** deletes it behind a confirmation; both are Ollama-only, since an OpenAI-compatible
-endpoint has no install API.
-
-Reading pictures is off by default and costs about a second per image, so it runs only on files you
-ask about unless you turn on "Look at every picture during the scan".
-
 ## When the date is wrong
 
 A camera whose battery died resets its clock to a factory default — usually 1 January of 2000, 2003
@@ -116,9 +103,9 @@ The same questions in flat 2D, often quicker to read:
 The first figure is also the way in. Click a square to drop into it, drag for a range, or click a
 row label for a whole year; the grid refines from years to months to days to hours.
 
-Whatever you pick scopes the whole app: every figure recounts itself, and Timeline, Gallery and
-Gallery show only those files. A bar under the toolbar tracks where you are — `All time › 2019 › Mar
-2019` — each step clickable, plus **Back** and **Show all**. Scanning again clears it.
+Whatever you pick scopes the whole app: every figure recounts itself, and the folder tree, Timeline
+and Gallery show only those files. A bar under the toolbar tracks where you are — `All time › 2019 ›
+Mar 2019` — each step clickable, plus **Back** and **Show all**. Scanning again clears it.
 
 ## Turning pictures upright
 

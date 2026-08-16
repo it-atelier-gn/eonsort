@@ -2,7 +2,6 @@ use crate::preview::{preview, thumbnail, Preview, Thumbnail};
 use crate::settings::{self, Settings};
 use crate::state::AppState;
 use chrono::{Local, NaiveDate, NaiveDateTime};
-use eonsort_core::ai::{self, AiConfig, Client};
 use eonsort_core::copy::{self, CopyOptions, CopyProgress, CopyReport, Outcome};
 use eonsort_core::model::PlanEntry;
 use eonsort_core::overrides::{
@@ -36,30 +35,9 @@ pub struct ScanRequest {
     pub strategy: Strategy,
     pub follow_symlinks: bool,
     #[serde(default)]
-    pub ai: AiConfig,
-    #[serde(default)]
     pub auto_rotate: bool,
     #[serde(default)]
     pub upright: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ModelStatus {
-    pub reachable: bool,
-    pub models: Vec<String>,
-    pub error: Option<String>,
-    pub vision_present: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ReadingView {
-    pub taken: Option<String>,
-    pub taken_epoch: Option<i64>,
-    pub confident: bool,
-    pub source: Option<String>,
-    pub subject: Option<String>,
-    pub tags: Vec<String>,
-    pub caption: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -200,7 +178,6 @@ pub fn start_scan(
         sources: request.sources,
         destination: request.destination,
         folder_pattern: request.folder_pattern,
-        ai: request.ai,
         detect: DetectOptions {
             providers: request.providers,
             strategy: request.strategy,
@@ -944,116 +921,6 @@ pub fn set_excluded(
     overrides::write_excluded(&path, &current).map_err(|e| e.to_string())?;
     reload(&app)?;
     Ok(changed)
-}
-
-#[tauri::command]
-pub fn check_model(config: AiConfig) -> ModelStatus {
-    match ai::probe(&config) {
-        Ok(models) => {
-            let has = |wanted: &str| {
-                let wanted = wanted.trim();
-                !wanted.is_empty()
-                    && models
-                        .iter()
-                        .any(|m| m == wanted || m.split(':').next() == Some(wanted))
-            };
-            ModelStatus {
-                reachable: true,
-                vision_present: has(&config.vision_model),
-                models,
-                error: None,
-            }
-        }
-        Err(err) => ModelStatus {
-            reachable: false,
-            models: Vec::new(),
-            vision_present: false,
-            error: Some(err.to_string()),
-        },
-    }
-}
-
-#[derive(Clone, Serialize)]
-struct ModelDone {
-    model: String,
-}
-
-#[tauri::command]
-pub fn install_model(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    config: AiConfig,
-    model: String,
-) -> Result<(), String> {
-    {
-        let mut downloading = state.downloading.lock().unwrap();
-        if let Some(running) = downloading.as_ref() {
-            return Err(format!("{running} is still downloading"));
-        }
-        *downloading = Some(model.clone());
-    }
-    state.model_cancel.store(false, Ordering::Relaxed);
-
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        let state = handle.state::<AppState>();
-        let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
-        let result = ai::pull(
-            &config,
-            &model,
-            &state.model_cancel,
-            &|progress: ai::PullProgress| {
-                emit_throttled(&handle, "model:progress", &progress, &throttle);
-            },
-        );
-        *state.downloading.lock().unwrap() = None;
-
-        match result {
-            Ok(()) => {
-                let _ = handle.emit("model:done", ModelDone { model });
-            }
-            Err(err) => {
-                let _ = handle.emit("model:error", err.to_string());
-            }
-        }
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn cancel_install(state: State<'_, AppState>) {
-    state.model_cancel.store(true, Ordering::Relaxed);
-}
-
-#[tauri::command]
-pub async fn uninstall_model(config: AiConfig, model: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || ai::remove(&config, &model))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn read_with_model(app: AppHandle, source: PathBuf) -> Result<ReadingView, String> {
-    let config = settings::load(&app).ai;
-    if !config.usable() {
-        return Err("switch the local model on in the setup panel first".into());
-    }
-
-    let client = Client::new(config);
-    let reading =
-        eonsort_core::providers::vision::read(&source, Some(&client)).map_err(|e| e.to_string())?;
-
-    Ok(ReadingView {
-        taken: reading.taken.map(format_time),
-        taken_epoch: reading.taken.map(epoch),
-        confident: reading.date_confident,
-        source: reading.date_source,
-        subject: reading.subject,
-        tags: reading.tags,
-        caption: reading.caption,
-    })
 }
 
 fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {

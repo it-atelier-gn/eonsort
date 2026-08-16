@@ -1,4 +1,3 @@
-use eonsort_core::ai::AiConfig;
 use eonsort_core::model::DEFAULT_FOLDER_PATTERN;
 use eonsort_core::providers::{Provider, Strategy};
 use serde::{Deserialize, Serialize};
@@ -21,7 +20,6 @@ pub struct Settings {
     pub preserve_times: bool,
     pub compare_hashes: bool,
     pub last_plan: Option<PathBuf>,
-    pub ai: AiConfig,
 }
 
 impl Default for Settings {
@@ -38,7 +36,6 @@ impl Default for Settings {
             preserve_times: true,
             compare_hashes: false,
             last_plan: None,
-            ai: AiConfig::default(),
         }
     }
 }

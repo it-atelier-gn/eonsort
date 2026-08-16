@@ -19,9 +19,7 @@ pub struct Session {
 pub struct AppState {
     pub session: Mutex<Session>,
     pub cancel: Arc<AtomicBool>,
-    pub model_cancel: Arc<AtomicBool>,
     pub upright_cancel: Arc<AtomicBool>,
-    pub downloading: Mutex<Option<String>>,
     pub fetching_upright: Mutex<bool>,
 }
 
@@ -30,9 +28,7 @@ impl Default for AppState {
         Self {
             session: Mutex::new(Session::default()),
             cancel: Arc::new(AtomicBool::new(false)),
-            model_cancel: Arc::new(AtomicBool::new(false)),
             upright_cancel: Arc::new(AtomicBool::new(false)),
-            downloading: Mutex::new(None),
             fetching_upright: Mutex::new(false),
         }
     }

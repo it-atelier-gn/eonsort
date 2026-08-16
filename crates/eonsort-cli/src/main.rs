@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use eonsort_core::ai::AiConfig;
 use eonsort_core::copy::{self, CopyOptions, CopyProgress};
 use eonsort_core::model::DEFAULT_FOLDER_PATTERN;
 use eonsort_core::overrides;
@@ -66,15 +65,6 @@ struct ScanArgs {
     /// Turn sideways pictures upright when copying, using the orientation their metadata records.
     #[arg(long)]
     auto_rotate: bool,
-    /// Ask a local vision model to read dates printed in the pictures themselves.
-    #[arg(long)]
-    vision: bool,
-    /// Address of the local model runner.
-    #[arg(long, default_value = eonsort_core::ai::DEFAULT_ENDPOINT)]
-    model_endpoint: String,
-    /// Name of the local vision model to use.
-    #[arg(long, default_value = eonsort_core::ai::DEFAULT_VISION_MODEL)]
-    vision_model: String,
     /// Folder holding the upright model weights. Given one, pictures whose metadata says nothing
     /// about their orientation are looked at to work out which way is up.
     #[arg(long)]
@@ -207,21 +197,12 @@ fn install_cancel_handler() -> Result<Arc<AtomicBool>> {
 }
 
 fn run_scan(args: &ScanArgs, cancel: &AtomicBool) -> Result<(PathBuf, u64)> {
-    let mut providers: Vec<Provider> = args.provider.iter().map(|p| (*p).into()).collect();
-    if args.vision && !providers.contains(&Provider::Vision) {
-        providers.push(Provider::Vision);
-    }
+    let providers: Vec<Provider> = args.provider.iter().map(|p| (*p).into()).collect();
 
     let options = ScanOptions {
         sources: args.source.clone(),
         destination: args.destination.clone(),
         folder_pattern: args.pattern.clone(),
-        ai: AiConfig {
-            enabled: args.vision,
-            endpoint: args.model_endpoint.clone(),
-            vision_model: args.vision_model.clone(),
-            ..AiConfig::default()
-        },
         detect: DetectOptions {
             providers,
             strategy: args.strategy.into(),

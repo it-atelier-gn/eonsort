@@ -1,41 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Provider = "filename" | "exif" | "media" | "vision" | "filesystem";
+export type Provider = "filename" | "exif" | "media" | "filesystem";
 export type Strategy = "smart" | "oldest" | "priority";
 export type Confidence = "high" | "medium" | "low";
-export type ModelApi = "ollama" | "open_ai";
-
-export interface AiConfig {
-  enabled: boolean;
-  endpoint: string;
-  api: ModelApi;
-  vision_model: string;
-  vision_in_scan: boolean;
-  timeout_seconds: number;
-}
-
-export interface PullProgress {
-  status: string;
-  completed: number;
-  total: number;
-}
-
-export interface ModelStatus {
-  reachable: boolean;
-  models: string[];
-  error: string | null;
-  vision_present: boolean;
-}
-
-export interface ReadingView {
-  taken: string | null;
-  taken_epoch: number | null;
-  confident: boolean;
-  source: string | null;
-  subject: string | null;
-  tags: string[];
-  caption: string | null;
-}
 
 export interface Settings {
   sources: string[];
@@ -49,7 +16,6 @@ export interface Settings {
   preserve_times: boolean;
   compare_hashes: boolean;
   last_plan: string | null;
-  ai: AiConfig;
 }
 
 export interface ScanRequest {
@@ -59,7 +25,6 @@ export interface ScanRequest {
   providers: Provider[];
   strategy: Strategy;
   follow_symlinks: boolean;
-  ai: AiConfig;
   auto_rotate: boolean;
 }
 
@@ -273,15 +238,6 @@ export const rotateMarked = (sources: string[], quarterTurns: number) =>
 export const probeRotation = (source: string) =>
   invoke<RotationProbe>("probe_rotation", { source });
 export const previewFile = (path: string) => invoke<Preview>("preview_file", { path });
-export const checkModel = (config: AiConfig) => invoke<ModelStatus>("check_model", { config });
-export const installModel = (config: AiConfig, model: string) =>
-  invoke<void>("install_model", { config, model });
-export const cancelInstall = () => invoke<void>("cancel_install");
-export const uninstallModel = (config: AiConfig, model: string) =>
-  invoke<void>("uninstall_model", { config, model });
-export const readWithModel = (source: string) =>
-  invoke<ReadingView>("read_with_model", { source });
-
 export function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;

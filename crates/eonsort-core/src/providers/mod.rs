@@ -2,9 +2,7 @@ mod exif;
 mod filename;
 mod filesystem;
 mod media;
-pub mod vision;
 
-use crate::ai::{Client, Reading};
 use crate::suspect::{self, Flag};
 use chrono::{Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
@@ -20,16 +18,14 @@ pub enum Provider {
     Filename,
     Exif,
     Media,
-    Vision,
     Filesystem,
 }
 
 impl Provider {
-    pub const ALL: [Provider; 5] = [
+    pub const ALL: [Provider; 4] = [
         Provider::Filename,
         Provider::Exif,
         Provider::Media,
-        Provider::Vision,
         Provider::Filesystem,
     ];
 
@@ -45,20 +41,14 @@ impl Provider {
             Provider::Filename => "filename",
             Provider::Exif => "exif",
             Provider::Media => "media",
-            Provider::Vision => "vision",
             Provider::Filesystem => "filesystem",
         }
-    }
-
-    pub fn needs_model(self) -> bool {
-        matches!(self, Provider::Vision)
     }
 
     pub fn trust_rank(self) -> i64 {
         match self {
             Provider::Exif | Provider::Media => 40,
             Provider::Filename => 30,
-            Provider::Vision => 25,
             Provider::Filesystem => 10,
         }
     }
@@ -124,18 +114,12 @@ pub struct Resolved {
     pub chosen: Detection,
     pub candidates: Vec<Detection>,
     pub flags: Vec<Flag>,
-    pub reading: Option<Reading>,
 }
 
-pub fn detect_all(
-    path: &Path,
-    meta: &Metadata,
-    providers: &[Provider],
-    reading: Option<&Reading>,
-) -> Vec<Detection> {
+pub fn detect_all(path: &Path, meta: &Metadata, providers: &[Provider]) -> Vec<Detection> {
     let mut found: Vec<Detection> = providers
         .iter()
-        .filter_map(|p| run(*p, path, meta, reading))
+        .filter_map(|p| run(*p, path, meta))
         .collect();
     found.sort_by_key(|d| d.provider);
     found.dedup_by_key(|d| d.provider);
@@ -160,33 +144,20 @@ pub fn choose(
     }
 }
 
-pub fn resolve(
-    path: &Path,
-    meta: &Metadata,
-    opts: &DetectOptions,
-    ai: Option<&Client>,
-) -> Option<Resolved> {
+pub fn resolve(path: &Path, meta: &Metadata, opts: &DetectOptions) -> Option<Resolved> {
     let ctx = DetectContext::for_file(meta);
-    let reading = opts
-        .providers
-        .iter()
-        .any(|p| p.needs_model())
-        .then(|| vision::read(path, ai).ok())
-        .flatten();
-
-    let candidates = detect_all(path, meta, &opts.providers, reading.as_ref());
+    let candidates = detect_all(path, meta, &opts.providers);
     let chosen = choose(&candidates, opts, &ctx)?;
     let flags = suspect::entry_flags(chosen.taken, &candidates, ctx.filesystem_latest, ctx.now);
     Some(Resolved {
         chosen,
         candidates,
         flags,
-        reading,
     })
 }
 
 pub fn detect(path: &Path, meta: &Metadata, opts: &DetectOptions) -> Option<Detection> {
-    resolve(path, meta, opts, None).map(|r| r.chosen)
+    resolve(path, meta, opts).map(|r| r.chosen)
 }
 
 fn smart(candidates: &[Detection], ctx: &DetectContext) -> Option<Detection> {
@@ -217,19 +188,11 @@ fn score(candidate: &Detection, candidates: &[Detection], ctx: &DetectContext) -
         + CONSENSUS_BONUS * corroborators
 }
 
-fn run(
-    provider: Provider,
-    path: &Path,
-    meta: &Metadata,
-    reading: Option<&Reading>,
-) -> Option<Detection> {
+fn run(provider: Provider, path: &Path, meta: &Metadata) -> Option<Detection> {
     match provider {
         Provider::Filename => filename::detect(path),
         Provider::Exif => exif::detect(path),
         Provider::Media => media::detect(path),
-        Provider::Vision => reading
-            .filter(|r| r.date_confident)
-            .and_then(vision::into_detection),
         Provider::Filesystem => filesystem::detect(meta),
     }
 }
@@ -299,7 +262,7 @@ mod tests {
         let path = write(dir.path(), "IMG_20050102_030405.dat");
         let meta = fs::metadata(&path).unwrap();
 
-        let candidates = detect_all(&path, &meta, &Provider::ALL, None);
+        let candidates = detect_all(&path, &meta, &Provider::ALL);
         let providers: Vec<Provider> = candidates.iter().map(|c| c.provider).collect();
         assert_eq!(providers, vec![Provider::Filename, Provider::Filesystem]);
     }
@@ -371,7 +334,7 @@ mod tests {
         let path = write(dir.path(), "IMG_20050102_030405.dat");
         let meta = fs::metadata(&path).unwrap();
 
-        let resolved = resolve(&path, &meta, &DetectOptions::default(), None).unwrap();
+        let resolved = resolve(&path, &meta, &DetectOptions::default()).unwrap();
         assert_eq!(resolved.candidates.len(), 2);
         assert!(resolved
             .flags

@@ -1,19 +1,12 @@
 import type { EntryView, Provider } from "$lib/api";
 import { isSuspect } from "$lib/dates";
 
-export const PROVIDER_ORDER: Provider[] = [
-  "filename",
-  "exif",
-  "media",
-  "vision",
-  "filesystem",
-];
+export const PROVIDER_ORDER: Provider[] = ["filename", "exif", "media", "filesystem"];
 
 export const PROVIDER_LABEL: Record<Provider, string> = {
   filename: "File name",
   exif: "EXIF",
   media: "Media",
-  vision: "In the picture",
   filesystem: "File system",
 };
 
@@ -21,7 +14,6 @@ export const PROVIDER_COLOUR: Record<Provider, string> = {
   filename: "#3987e5",
   exif: "#d95926",
   media: "#199e70",
-  vision: "#c98500",
   filesystem: "#d55181",
 };
 

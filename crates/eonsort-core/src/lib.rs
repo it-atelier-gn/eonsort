@@ -1,4 +1,3 @@
-pub mod ai;
 pub mod copy;
 pub mod dateparse;
 pub mod error;
@@ -16,7 +15,6 @@ pub mod verify;
 pub mod weights;
 pub mod yolo;
 
-pub use ai::{AiConfig, Api as AiApi, Client as AiClient, Reading};
 pub use error::{Error, Result};
 pub use model::{
     destination_for, duplicate_variant, validate_folder_pattern, PlanEntry, PlanHeader, PlanRecord,

@@ -134,7 +134,6 @@
   const issueCount = $derived(
     skipped.length + copyFailures.length + (verifyReport?.issues.length ?? 0) + suspects.length,
   );
-  const modelReady = $derived(settings?.ai.enabled === true);
   const scope = $derived<TimeRange | null>(scopes[scopes.length - 1] ?? null);
   const scopedEntries = $derived(filterRange(timelineEntries, scope));
   const entries = $derived(under(scopedEntries, selectedFolder));
@@ -167,11 +166,6 @@
 
   function popScope(depth: number) {
     scopes = scopes.slice(0, Math.max(0, depth));
-  }
-
-  function scanProviders(current: Settings): Provider[] {
-    if (current.ai.enabled && current.ai.vision_in_scan) return current.providers;
-    return current.providers.filter((provider) => provider !== "vision");
   }
 
   let unlisteners: UnlistenFn[] = [];
@@ -487,10 +481,9 @@
         sources: settings!.sources,
         destination: settings!.destination,
         folder_pattern: settings!.folder_pattern,
-        providers: scanProviders(settings!),
+        providers: settings!.providers,
         strategy: settings!.strategy,
         follow_symlinks: settings!.follow_symlinks,
-        ai: settings!.ai,
         auto_rotate: settings!.auto_rotate,
       });
     });
@@ -613,7 +606,6 @@
         {preview}
         loading={previewLoading}
         busy={fixing || busy}
-        {modelReady}
         onOpen={openInSystem}
         onReveal={reveal}
         onChoose={chooseDate}
