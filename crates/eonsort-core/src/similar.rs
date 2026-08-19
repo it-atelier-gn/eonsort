@@ -7,8 +7,8 @@ pub const NEAR_DUPLICATE_BITS: u32 = 10;
 pub const HASH_WIDTH: u32 = 9;
 pub const HASH_HEIGHT: u32 = 8;
 
-const HASHABLE: [&str; 10] = [
-    "jpg", "jpeg", "jpe", "png", "webp", "tif", "tiff", "bmp", "gif", "avif",
+const HASHABLE: [&str; 13] = [
+    "jpg", "jpeg", "jpe", "png", "webp", "tif", "tiff", "bmp", "gif", "avif", "heic", "heif", "hif",
 ];
 
 pub fn hashable(path: &Path) -> bool {
@@ -22,7 +22,7 @@ pub fn fingerprint(path: &Path) -> Option<u64> {
     if !hashable(path) {
         return None;
     }
-    let image = image::open(path).ok()?;
+    let image = crate::imageio::open(path)?;
     let small = image
         .resize_exact(
             HASH_WIDTH,

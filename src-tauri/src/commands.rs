@@ -1290,7 +1290,20 @@ fn is_picture(path: &Path) -> bool {
             .and_then(|e| e.to_str())
             .map(|e| e.to_ascii_lowercase())
             .as_deref(),
-        Some("jpg" | "jpeg" | "jpe" | "png" | "webp" | "bmp" | "tif" | "tiff" | "gif")
+        Some(
+            "jpg"
+                | "jpeg"
+                | "jpe"
+                | "png"
+                | "webp"
+                | "bmp"
+                | "tif"
+                | "tiff"
+                | "gif"
+                | "heic"
+                | "heif"
+                | "hif"
+        )
     )
 }
 

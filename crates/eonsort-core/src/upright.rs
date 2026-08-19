@@ -348,8 +348,9 @@ impl Detector {
 
 #[cfg(feature = "upright")]
 fn scaled(source: &Path) -> Result<image::RgbImage> {
-    let picture =
-        image::open(source).map_err(|e| Error::Upright(format!("{}: {e}", source.display())))?;
+    let picture = crate::imageio::open(source).ok_or_else(|| {
+        Error::Upright(format!("{}: cannot be read as a picture", source.display()))
+    })?;
     Ok(picture
         .resize(
             INPUT_SIZE,

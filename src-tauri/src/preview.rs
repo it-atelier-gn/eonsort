@@ -9,6 +9,7 @@ const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_THUMBNAIL_BYTES: u64 = 96 * 1024 * 1024;
 const MIN_EMBEDDED_EDGE: u32 = 96;
 const TEXT_HEAD_BYTES: usize = 16 * 1024;
+const MAX_PREVIEW_EDGE: u32 = 2048;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -166,14 +167,24 @@ pub fn thumbnail(path: &Path, edge: u32, transform: Option<Transform>) -> Thumbn
     }
 
     let edge = edge.clamp(32, 1024);
-    let decoded = embedded_thumbnail(path)
-        .filter(|image| image.width().max(image.height()) >= MIN_EMBEDDED_EDGE)
-        .or_else(|| image::open(path).ok());
+    let heif = eonsort_core::imageio::is_heif_extension(&extension);
+    let decoded = if heif {
+        eonsort_core::imageio::open(path)
+    } else {
+        embedded_thumbnail(path)
+            .filter(|image| image.width().max(image.height()) >= MIN_EMBEDDED_EDGE)
+            .or_else(|| eonsort_core::imageio::open(path))
+    };
     let Some(decoded) = decoded else {
         return Thumbnail::None;
     };
-    let turn =
-        transform.unwrap_or_else(|| Transform::for_orientation(rotate::read_orientation(path)));
+    let turn = transform.unwrap_or_else(|| {
+        if heif {
+            Transform::None
+        } else {
+            Transform::for_orientation(rotate::read_orientation(path))
+        }
+    });
     let small = upright(decoded.thumbnail(edge, edge), turn).to_rgb8();
     let (width, height) = (small.width(), small.height());
 
@@ -225,11 +236,16 @@ fn image_mime(extension: &str) -> Option<&'static str> {
 }
 
 fn needs_decode(extension: &str) -> bool {
-    matches!(extension, "tif" | "tiff")
+    matches!(extension, "tif" | "tiff") || eonsort_core::imageio::is_heif_extension(extension)
 }
 
 fn decode_to_png(path: &Path) -> Option<String> {
-    let img = image::open(path).ok()?;
+    let img = eonsort_core::imageio::open(path)?;
+    let img = if img.width().max(img.height()) > MAX_PREVIEW_EDGE {
+        img.thumbnail(MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE)
+    } else {
+        img
+    };
     let mut buffer = Vec::new();
     img.write_to(
         &mut std::io::Cursor::new(&mut buffer),

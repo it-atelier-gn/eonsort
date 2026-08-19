@@ -23,6 +23,7 @@ tokenizers = { workspace = true, optional = true }
 blake3.workspace = true
 chrono.workspace = true
 filetime.workspace = true
+heif-oxide.workspace = true
 image.workspace = true
 kamadak-exif.workspace = true
 rayon.workspace = true

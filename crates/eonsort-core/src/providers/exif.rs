@@ -6,8 +6,8 @@ use std::io::BufReader;
 use std::path::Path;
 
 const EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "jpe", "tif", "tiff", "png", "webp", "heic", "heif", "avif", "dng", "cr2",
-    "cr3", "nef", "nrw", "arw", "sr2", "srf", "orf", "rw2", "raf", "pef", "3fr",
+    "jpg", "jpeg", "jpe", "tif", "tiff", "png", "webp", "heic", "heif", "hif", "avif", "dng",
+    "cr2", "cr3", "nef", "nrw", "arw", "sr2", "srf", "orf", "rw2", "raf", "pef", "3fr",
 ];
 
 const TAGS: &[(Tag, &str)] = &[

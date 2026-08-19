@@ -238,7 +238,9 @@ mod real {
     }
 
     fn planes(path: &Path, device: &Device) -> Result<Tensor> {
-        let opened = image::open(path).map_err(stalled)?;
+        let opened = crate::imageio::open(path).ok_or_else(|| {
+            Error::Tagging(format!("{}: cannot be read as a picture", path.display()))
+        })?;
         let scaled = opened
             .resize_exact(
                 SIDE as u32,

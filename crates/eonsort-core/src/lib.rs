@@ -2,6 +2,7 @@ pub mod copy;
 pub mod dateparse;
 pub mod error;
 pub mod exif_write;
+pub mod imageio;
 pub mod model;
 pub mod overrides;
 pub mod plan;
