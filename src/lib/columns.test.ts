@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   cleanOrder,
+  cleanWidths,
   isColumnId,
   moveColumn,
   template,
   widthOf,
+  withWidth,
+  MAX_WIDTH,
+  MIN_WIDTH,
   DEFAULT_ORDER,
   type ColumnId,
 } from "./columns";
@@ -87,5 +91,36 @@ describe("Sizing a column to what is in it", () => {
   it("builds a grid template in the order given", () => {
     const widths = { name: 0, files: 60, size: 80 };
     expect(template(["size", "name", "files"], widths)).toBe("80px minmax(0, 1fr) 60px");
+  });
+});
+
+describe("column widths", () => {
+  it("keeps only known columns with usable numbers", () => {
+    expect(cleanWidths({ name: 200, nope: 90, size: "wide", files: NaN })).toEqual({ name: 200 });
+  });
+
+  it("survives anything that is not an object", () => {
+    expect(cleanWidths(null)).toEqual({});
+    expect(cleanWidths("120")).toEqual({});
+  });
+
+  it("holds a width inside its limits", () => {
+    expect(withWidth({}, "files", 4).files).toBe(MIN_WIDTH);
+    expect(withWidth({}, "files", 5000).files).toBe(MAX_WIDTH);
+    expect(withWidth({}, "files", 120.4).files).toBe(120);
+  });
+
+  it("drops a width to go back to fitting the content", () => {
+    expect(withWidth({ files: 120 }, "files", null)).toEqual({});
+  });
+
+  it("leaves the widths it was given alone", () => {
+    const held = { files: 120 };
+    withWidth(held, "size", 90);
+    expect(held).toEqual({ files: 120 });
+  });
+
+  it("gives a resized folder column a fixed track", () => {
+    expect(template(DEFAULT_ORDER, { name: 240, files: 60, size: 80 })).toBe("240px 60px 80px");
   });
 });

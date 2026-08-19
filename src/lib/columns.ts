@@ -14,6 +14,11 @@ export const COLUMNS: Record<ColumnId, Column> = {
 
 export const DEFAULT_ORDER: ColumnId[] = ["name", "files", "size"];
 export const ORDER_KEY = "eonsort.tree.columns";
+export const WIDTH_KEY = "eonsort.tree.widths";
+export const MIN_WIDTH = 48;
+export const MAX_WIDTH = 640;
+
+export type ColumnWidths = Partial<Record<ColumnId, number>>;
 
 export function isColumnId(value: unknown): value is ColumnId {
   return value === "name" || value === "files" || value === "size";
@@ -57,4 +62,34 @@ export function template(order: ColumnId[], widths: Record<ColumnId, number>): s
   return cleanOrder(order)
     .map((id) => (widths[id] > 0 ? `${widths[id]}px` : "minmax(0, 1fr)"))
     .join(" ");
+}
+
+export function clampWidth(width: number): number {
+  return Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width)));
+}
+
+export function cleanWidths(value: unknown): ColumnWidths {
+  if (typeof value !== "object" || value === null) return {};
+
+  const kept: ColumnWidths = {};
+  for (const [id, width] of Object.entries(value)) {
+    if (isColumnId(id) && typeof width === "number" && Number.isFinite(width)) {
+      kept[id] = clampWidth(width);
+    }
+  }
+  return kept;
+}
+
+export function withWidth(
+  widths: ColumnWidths,
+  id: ColumnId,
+  width: number | null,
+): ColumnWidths {
+  const next = cleanWidths(widths);
+  if (width === null) {
+    delete next[id];
+  } else {
+    next[id] = clampWidth(width);
+  }
+  return next;
 }

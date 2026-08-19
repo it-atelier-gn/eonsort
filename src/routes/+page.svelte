@@ -52,11 +52,16 @@
   import TreeHeader from "$lib/components/TreeHeader.svelte";
   import {
     cleanOrder,
+    cleanWidths,
     template,
     widthOf,
+    withWidth,
     ORDER_KEY,
+    WIDTH_KEY,
     type ColumnId,
+    type ColumnWidths,
   } from "$lib/columns";
+  import { appVersion, versionLabel } from "$lib/version";
   import SetupPanel from "$lib/components/SetupPanel.svelte";
   import TreeItem from "$lib/components/TreeItem.svelte";
   import FileList from "$lib/components/FileList.svelte";
@@ -107,6 +112,8 @@
   let patternError = $state<string | null>(null);
 
   let columnOrder = $state<ColumnId[]>(rememberedOrder());
+  let columnWidths = $state<ColumnWidths>(rememberedWidths());
+  let version = $state<string | null>(null);
 
   function rememberedOrder(): ColumnId[] {
     if (typeof localStorage === "undefined") return cleanOrder(null);
@@ -120,11 +127,30 @@
 
   function reorderColumns(next: ColumnId[]) {
     columnOrder = next;
+    remember(ORDER_KEY, next);
+  }
+
+  function rememberedWidths(): ColumnWidths {
+    if (typeof localStorage === "undefined") return {};
+    try {
+      const held = localStorage.getItem(WIDTH_KEY);
+      return cleanWidths(held === null ? null : JSON.parse(held));
+    } catch {
+      return {};
+    }
+  }
+
+  function resizeColumn(id: ColumnId, width: number | null) {
+    columnWidths = withWidth(columnWidths, id, width);
+    remember(WIDTH_KEY, columnWidths);
+  }
+
+  function remember(key: string, value: unknown) {
     if (typeof localStorage === "undefined") return;
     try {
-      localStorage.setItem(ORDER_KEY, JSON.stringify(next));
+      localStorage.setItem(key, JSON.stringify(value));
     } catch {
-      // an order we cannot remember is not worth interrupting anyone over
+      // a layout we cannot remember is not worth interrupting anyone over
     }
   }
 
@@ -170,15 +196,19 @@
   const flatTree = $derived(flatten(tree));
   const columnGrid = $derived(
     template(columnOrder, {
-      name: 0,
-      files: widthOf(
-        "files",
-        flatTree.map((node) => String(node.files)),
-      ),
-      size: widthOf(
-        "size",
-        flatTree.map((node) => formatBytes(node.bytes)),
-      ),
+      name: columnWidths.name ?? 0,
+      files:
+        columnWidths.files ??
+        widthOf(
+          "files",
+          flatTree.map((node) => String(node.files)),
+        ),
+      size:
+        columnWidths.size ??
+        widthOf(
+          "size",
+          flatTree.map((node) => formatBytes(node.bytes)),
+        ),
     }),
   );
 
@@ -199,6 +229,7 @@
 
   onMount(async () => {
     settings = await getSettings();
+    version = await appVersion();
 
     unlisteners = await Promise.all([
       listen<ScanProgress>("scan:progress", (e) => (scanProgress = e.payload)),
@@ -698,7 +729,12 @@
         <TimeScape entries={scopedEntries} selected={selectedEntry} onSelect={selectEntry} />
       {:else}
         <div class="tree scroll" role="tree" aria-label="Planned folders">
-          <TreeHeader order={columnOrder} grid={columnGrid} onReorder={reorderColumns} />
+          <TreeHeader
+            order={columnOrder}
+            grid={columnGrid}
+            onReorder={reorderColumns}
+            onResize={resizeColumn}
+          />
           {#each tree as node (node.path)}
             <TreeItem
               {node}
@@ -830,6 +866,11 @@
     <button class="ghost" onclick={() => (issuesOpen = !issuesOpen)}>
       Issues {issueCount > 0 ? `(${issueCount})` : ""}
     </button>
+
+    {#if versionLabel(version)}
+      <span class="split" aria-hidden="true"></span>
+      <span class="version">{versionLabel(version)}</span>
+    {/if}
   </footer>
 </div>
 
@@ -1032,6 +1073,19 @@
 
   .error {
     color: var(--danger);
+  }
+
+  .split {
+    width: 1px;
+    height: 12px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  .version {
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
   }
 
   .bar {

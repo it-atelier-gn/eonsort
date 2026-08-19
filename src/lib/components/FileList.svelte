@@ -1,6 +1,7 @@
 <script lang="ts">
   import { formatBytes, type EntryView } from "$lib/api";
   import { CONFIDENCE_LABEL, CONFIDENCE_TONE, hardFlags, isSuspect } from "$lib/dates";
+  import { nextRow } from "$lib/rows";
 
   interface Props {
     entries: EntryView[];
@@ -15,6 +16,7 @@
   let { entries, folder, selected, marked, onSelect, onMark, onOpen }: Props = $props();
 
   let anchor = $state(-1);
+  let rows: HTMLTableRowElement[] = [];
 
   function status(entry: EntryView): { label: string; tone: string } | null {
     if (entry.outcome === "failed") return { label: "failed", tone: "danger" };
@@ -53,6 +55,25 @@
 
     onMark([entry.source]);
   }
+
+  function walk(event: KeyboardEvent, index: number) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onOpen(entries[index]);
+      return;
+    }
+
+    const target = nextRow(event.key, index, entries.length);
+    if (target === null) return;
+
+    const entry = entries[target];
+    event.preventDefault();
+    anchor = target;
+    onSelect(entry);
+    onMark([entry.source]);
+    rows[target]?.focus();
+    rows[target]?.scrollIntoView({ block: "nearest" });
+  }
 </script>
 
 <div class="list scroll">
@@ -75,10 +96,13 @@
         {#each entries as entry, index (entry.source)}
           {@const tag = status(entry)}
           <tr
+            bind:this={rows[index]}
+            tabindex={(selected === null ? index === 0 : selected.source === entry.source) ? 0 : -1}
             class:selected={selected?.source === entry.source}
             class:marked={marked.includes(entry.source)}
             onclick={(event) => click(event, entry, index)}
             ondblclick={() => onOpen(entry)}
+            onkeydown={(event) => walk(event, index)}
           >
             <td class="truncate name" title={entry.destination}>{entry.name}</td>
             <td class="mono nowrap dim date" title={dateTitle(entry)}>

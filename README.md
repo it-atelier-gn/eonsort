@@ -11,10 +11,15 @@ tool last touched them.
 Point it at your photo folders, press **Scan**, and you get the full resulting tree as a preview
 before a byte is copied. Then press **Copy files**. Sources are only ever read.
 
-The tree is a table: **Folder**, **Files** and **Size**, each column sized to what is in it and
-draggable into whatever order you prefer, which is remembered. Clicking a folder shows everything
-underneath it, so a year lists its whole year rather than nothing at all, and a time range picked in
-**Charts** prunes the tree to match.
+The tree is a table: **Folder**, **Files** and **Size**, each column sized to what is in it, drag
+the edge of a heading to set a width of your own or double-click that edge to fit the contents
+again, and drag the heading itself to reorder. Widths and order are both remembered. Clicking a
+folder shows everything underneath it, so a year lists its whole year rather than nothing at all,
+and a time range picked in **Charts** prunes the tree to match.
+
+In the file list, <kbd>↑</kbd> and <kbd>↓</kbd> walk from file to file with the preview pane
+following the selection, <kbd>Home</kbd> and <kbd>End</kbd> jump to either end, and <kbd>Enter</kbd>
+opens the selected file. The installed version is shown at the right-hand end of the status bar.
 
 Windows, Linux and macOS — desktop app and `eonsort` command line tool.
 
@@ -50,11 +55,12 @@ names. Type `forest and dog` and press Enter; every view narrows to the pictures
 by how well. **Clear** puts everything back.
 
 The work is [SigLIP](https://huggingface.co/google/siglip-base-patch16-224) running locally on the
-CPU — nothing leaves your machine, and no runner needs hosting. It needs the optional `tagging`
-feature and a one-off download of about 780 MB, offered in the setup panel:
+CPU — nothing leaves your machine, and no runner needs hosting. Released builds ship with it; all it
+needs is a one-off download of about 780 MB, offered in the setup panel. A build of your own needs
+the `tagging` feature turned on:
 
 ```sh
-cargo tauri build --features tagging
+cargo tauri build --features upright,tagging
 ```
 
 Weights land in `models/` inside the app data folder; delete that folder to reclaim the space.
