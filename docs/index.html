@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>eonsort — the date on the file isn't always the date of the memory</title>
-<meta name="description" content="eonsort reads five sources for when a file was actually made, catches the ones a dead camera battery got wrong, and sorts the rest into a clean date tree. Sources are only ever read." />
+<title>eonsort: sort files by the date they were actually made</title>
+<meta name="description" content="eonsort reads four independent sources for when a file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. The full result is shown before anything is copied. Sources are only ever read." />
 <meta name="theme-color" content="#06121f" />
 <link rel="icon" href="favicon.png" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-<meta property="og:title" content="eonsort — proof of date for your archive" />
-<meta property="og:description" content="Five sources, cross-examined. Sorts files into date-based folders by the date they were actually made — not the date a backup tool last touched them." />
+<meta property="og:title" content="eonsort: sort files by the date they were actually made" />
+<meta property="og:description" content="Four date sources, cross-checked. The complete destination tree is shown as a preview before a byte is copied. Sources are only ever read." />
 <meta property="og:image" content="https://it-atelier-gn.github.io/eonsort/screenshot.png" />
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
@@ -146,8 +146,8 @@
   }
   @keyframes driftUp{
     0%{ opacity:0; transform:translateY(20px); }
-    8%{ opacity:0.55; }
-    88%{ opacity:0.4; }
+    8%{ opacity:0.42; }
+    88%{ opacity:0.3; }
     100%{ opacity:0; transform:translateY(-180px); }
   }
 
@@ -239,7 +239,7 @@
   .reveal.in{ opacity:1; transform:none; }
 
   /* source cards */
-  .sources-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:22px; }
+  .sources-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:22px; }
   @media (max-width:900px){ .sources-grid{ grid-template-columns:repeat(2,1fr); } }
   @media (max-width:600px){ .sources-grid{ grid-template-columns:1fr; } }
 
@@ -370,11 +370,6 @@
   .foot-links{ display:flex; gap:24px; font-family:var(--mono); font-size:13px; }
   .foot-links a{ text-decoration:none; color:var(--ink-dim); }
   .foot-links a:hover{ color:var(--cyan); }
-  .case-closed{
-    font-family:var(--mono); font-weight:700; font-size:13px; letter-spacing:.14em;
-    color:var(--red); border:2px solid var(--red); padding:6px 12px; border-radius:4px;
-    transform:rotate(-6deg); opacity:.55; display:inline-block; margin-top:26px;
-  }
 </style>
 </head>
 <body>
@@ -387,7 +382,8 @@
     <a href="#top" class="brand"><span class="mark"><i></i><i></i><i></i></span>eonsort</a>
     <div class="navlinks-mobile-hide">
       <a href="#sources">Sources</a>
-      <a href="#see">Visuals</a>
+      <a href="#preview">Preview</a>
+      <a href="#see">Views</a>
       <a href="#safety">Safety</a>
       <a href="#download" class="cta">Download</a>
     </div>
@@ -401,18 +397,18 @@
     <div class="drift-field" id="driftField"></div>
     <div class="wrap hero-grid">
       <div>
-        <p class="eyebrow">Proof of date · v0.0.2</p>
-        <h1>The date on the file<br>isn't always <em>the date<br>of the memory.</em></h1>
-        <p class="lede">eonsort cross-examines <strong>five separate sources</strong> for when a photo or file was actually made, flags the ones a dead camera battery got wrong, and sorts the rest into a clean date tree — with the full plan on screen before a byte moves. <strong>Sources are only ever read.</strong></p>
+        <p class="eyebrow">Sorting by date · v0.0.5</p>
+        <h1>The date on the file<br>is not always <em>the date<br>it was made.</em></h1>
+        <p class="lede">eonsort reads <strong>four independent sources</strong> for when a photo or file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. The complete result is shown as a preview before a byte is copied. <strong>Sources are only ever read.</strong></p>
         <div class="cta-row">
           <a class="btn btn-primary" id="primaryDownload" href="#download">↓ Download for your platform</a>
           <a class="btn btn-ghost" href="https://github.com/it-atelier-gn/eonsort" target="_blank" rel="noopener">View source ↗</a>
         </div>
-        <p class="fineprint">Windows · macOS · Linux — desktop app and the <code>eonsort</code> command line tool. MIT licensed.</p>
+        <p class="fineprint">Windows, macOS and Linux. Desktop application and the <code>eonsort</code> command line tool. MIT licensed.</p>
       </div>
       <div class="stamp-stage">
         <div class="stamp-card">
-          <div class="head">plan.jsonl — entry 0417</div>
+          <div class="head">plan.jsonl · entry 0417</div>
           <div class="row"><span><i class="dot" style="background:var(--c-filename)"></i>File name</span><span>2019‑05‑14</span></div>
           <div class="row"><span><i class="dot" style="background:var(--c-exif)"></i>EXIF</span><span>2019‑05‑14</span></div>
           <div class="row"><span><i class="dot" style="background:var(--c-filesystem)"></i>File system</span><span>2003‑01‑01</span></div>
@@ -421,7 +417,7 @@
           <div class="tag">SOURCE: FILE SYSTEM</div>
           <div class="verdict">REJECTED</div>
           <div class="ts">2003-01-01 00:00:00</div>
-          <div class="why">factory-reset clock — every file after it shares the date</div>
+          <div class="why">factory reset clock; every file after it carries the same date</div>
         </div>
         <div class="stamp stamp-confirm">
           <div class="tag">CHOSEN DATE</div>
@@ -440,45 +436,36 @@
     <div class="wrap">
       <div class="section-head reveal">
         <p class="eyebrow">Where the date comes from</p>
-        <h2>Four places carry a date.<br>Sometimes a fifth.</h2>
-        <p>Every source that reports one is kept — each can be switched off. Three rules choose between them when they disagree.</p>
+        <h2>Four sources, cross-checked.</h2>
+        <p>Every source that reports a date is kept, and each one can be switched off. When they disagree, one of three rules decides which date is used.</p>
       </div>
 
       <div class="sources-grid">
         <div class="idx-card reveal">
           <div class="tape"></div>
           <div class="src-label"><i class="dot" style="background:var(--c-filename)"></i>File name</div>
-          <p><code>IMG_20230506_101112.jpg</code>, <code>Screenshot 2021-07-04</code>, <code>Rechnung 06.05.2021</code> — and many more shapes.</p>
+          <p><code>IMG_20230506_101112.jpg</code>, <code>Screenshot 2021-07-04</code>, <code>Rechnung 06.05.2021</code>, and many further shapes.</p>
         </div>
         <div class="idx-card reveal">
           <div class="tape"></div>
           <div class="src-label"><i class="dot" style="background:var(--c-exif)"></i>EXIF</div>
-          <p><code>DateTimeOriginal</code> and friends, in JPEG, TIFF, PNG, WebP, HEIF and common raw formats.</p>
+          <p><code>DateTimeOriginal</code> and related tags, in JPEG, TIFF, PNG, WebP, HEIF and common raw formats.</p>
         </div>
         <div class="idx-card reveal">
           <div class="tape"></div>
           <div class="src-label"><i class="dot" style="background:var(--c-media)"></i>Media</div>
-          <p>The recording time inside the <code>mvhd</code> box of MP4, MOV, M4A and related containers.</p>
+          <p>The recording time in the <code>mvhd</code> box of MP4, MOV, M4A and related containers.</p>
         </div>
         <div class="idx-card reveal">
           <div class="tape"></div>
           <div class="src-label"><i class="dot" style="background:var(--c-filesystem)"></i>File system</div>
-          <p>Whichever of created or modified is older — the one every backup tool likes to overwrite.</p>
-        </div>
-        <div class="idx-card optional reveal">
-          <div class="badge">Optional</div>
-          <div class="tape"></div>
-          <div class="src-label"><i class="dot" style="background:var(--c-vision)"></i>Tag what is in it</div>
-          <p>After a scan, eonsort looks at each picture in the background and tags it — <em>a forest</em>, <em>a dog</em>, <em>a birthday party</em>. Then search for <code>forest and dog</code> in plain words.</p>
-        </div>
-        <div class="idx-card reveal" style="display:flex; align-items:center; justify-content:center; text-align:center;">
-          <p style="color:var(--ink-faint)">SigLIP runs locally on the CPU. Nothing leaves your machine, and no runner has to be hosted.</p>
+          <p>Whichever of created or modified is older, the field most backup tools overwrite.</p>
         </div>
       </div>
 
       <div class="rules reveal">
         <div class="rule active">
-          <div class="name">Weigh the evidence <span class="mono" style="color:var(--ink-faint); font-weight:400;">— default</span></div>
+          <div class="name">Weigh the evidence <span class="mono" style="color:var(--ink-faint); font-weight:400;">(default)</span></div>
           <div class="desc">Discards impossible dates, then prefers the one two sources agree on.</div>
         </div>
         <div class="rule">
@@ -487,7 +474,7 @@
         </div>
         <div class="rule">
           <div class="name">First match wins</div>
-          <div class="desc">Walks the sources in order, stops at the first hit.</div>
+          <div class="desc">Walks the sources in order and stops at the first hit.</div>
         </div>
       </div>
     </div>
@@ -500,13 +487,13 @@
     <div class="wrap anom-layout">
       <div class="reveal">
         <p class="eyebrow">Anomalies</p>
-        <h2 style="margin-bottom:20px;">A dead battery doesn't ask permission.</h2>
-        <p style="color:var(--ink-dim); margin-bottom:26px;">A camera whose battery died resets its clock to a factory default — usually 1 January of 2000, 2003 or 2015 — and every photo after that carries a date that looks entirely real. eonsort flags rather than quietly misfiles:</p>
+        <h2 style="margin-bottom:20px;">When the clock was wrong.</h2>
+        <p style="color:var(--ink-dim); margin-bottom:26px;">A camera whose battery has died resets its clock to a factory default, usually 1 January of 2000, 2003 or 2015, and every photo taken after that carries a date that looks entirely plausible. eonsort flags these rather than misfiling them silently:</p>
         <ul class="anom-list">
           <li><span class="flag r">✕</span>A date on a factory‑reset instant, in the future, or later than the file was written.</li>
-          <li><span class="flag r">✕</span>A run of files counting up from a reset date while the files were written years later.</li>
+          <li><span class="flag r">✕</span>A run of files counting up from a reset date while the files themselves were written years later.</li>
           <li><span class="flag a">!</span>A batch of files sharing one timestamp to the second.</li>
-          <li><span class="flag a">!</span>A file stranded years from everything else in its folder, or out of step with its camera's counter.</li>
+          <li><span class="flag a">!</span>A file stranded years from everything else in its folder, or out of step with its camera’s counter.</li>
         </ul>
       </div>
       <div class="confidence-strip reveal">
@@ -531,7 +518,7 @@
           <span><i style="background:var(--cyan)"></i>sources agree</span>
           <span><i style="background:var(--amber)"></i>single source</span>
           <span><i style="background:var(--red)"></i>flagged</span>
-          <span><i style="background:var(--green)"></i>you corrected it</span>
+          <span><i style="background:var(--green)"></i>corrected by you</span>
         </div>
       </div>
     </div>
@@ -539,55 +526,27 @@
 
   <hr class="divider" />
 
-  <!-- SEE IT -->
-  <section id="see">
+  <!-- PREVIEW -->
+  <section id="preview">
     <div class="wrap">
       <div class="section-head reveal">
-        <p class="eyebrow">Four ways to look</p>
-        <h2>Walk into your archive.</h2>
-        <p>Every view scopes to whatever you clicked — the folder tree, Timeline and Gallery show only those files. In the two walkable ones: click to take the mouse, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, <kbd>Esc</kbd> to give it back.</p>
+        <p class="eyebrow">Preview before copy</p>
+        <h2>Nothing is written until you press Copy files.</h2>
+        <p>A scan only reads. What it produces is the complete destination tree, laid out exactly as the copy would create it, so the plan can be reviewed and corrected first.</p>
       </div>
 
-      <div class="filmstrip">
-        <div class="frame reveal">
-          <div class="sprockets top"></div>
-          <div class="frame-body">
-            <div class="num">01 / TIMELINE</div>
-            <h3>The whole plan in 3D</h3>
-            <p>One point per date each source reported, coloured by confidence. Three layouts that morph into each other — a disagreement field, a time helix, a memory terrain. A reset date lifts off the disc like a spire on an empty plain.</p>
-            <div class="kbdrow"><kbd>click to fly</kbd><kbd>auto‑fly</kbd></div>
-          </div>
-          <div class="sprockets bottom"></div>
+      <div class="rules reveal">
+        <div class="rule active">
+          <div class="name">The whole tree, in advance</div>
+          <div class="desc">Every destination folder with its file count and size. Columns can be sorted and reordered, and clicking a folder shows everything beneath it.</div>
         </div>
-        <div class="frame reveal">
-          <div class="sprockets top"></div>
-          <div class="frame-body">
-            <div class="num">02 / GALLERY</div>
-            <h3>A building out of your archive</h3>
-            <p>One room per period, oldest first, a longer hall for a busy year. Pictures hang at eye height, videos play in frame, daylight falls through a clerestory band. Rooms open into one another as one enfilade.</p>
-            <div class="kbdrow"><kbd>W A S D</kbd><kbd>E</kbd> open</div>
-          </div>
-          <div class="sprockets bottom"></div>
+        <div class="rule">
+          <div class="name">Issues, before they are copied</div>
+          <div class="desc">Flagged dates are grouped under Issues. Take the date from another source, type one in, or anchor a single file and shift a whole selection by that offset.</div>
         </div>
-        <div class="frame reveal">
-          <div class="sprockets top"></div>
-          <div class="frame-body">
-            <div class="num">03 / SEARCH</div>
-            <h3>Find it by what is in it</h3>
-            <p>Tagging runs in the background once a scan has finished, so it never holds the scan up. Ask for <code>forest and dog</code> in ordinary words and every view narrows to the pictures that match, ranked by how well.</p>
-            <div class="kbdrow"><kbd>drag corners</kbd><kbd>walk in</kbd></div>
-          </div>
-          <div class="sprockets bottom"></div>
-        </div>
-        <div class="frame reveal">
-          <div class="sprockets top"></div>
-          <div class="frame-body">
-            <div class="num">04 / CHARTS</div>
-            <h3>The same questions, flatter</h3>
-            <p>A square per month, year by year — click to drop in, drag for a range. Time of day, where each date came from, how sure eonsort is, and where the bulk lands. Whatever you pick scopes the whole app.</p>
-            <div class="kbdrow"><kbd>click</kbd><kbd>drag range</kbd></div>
-          </div>
-          <div class="sprockets bottom"></div>
+        <div class="rule">
+          <div class="name">Corrections kept beside the plan</div>
+          <div class="desc">Overrides and rotations are stored next to the plan file. They survive reopening, they are what the copy uses, and each one can be undone.</div>
         </div>
       </div>
 
@@ -596,7 +555,63 @@
           <div class="corner tl"></div>
           <img src="screenshot.png" alt="The eonsort desktop app, showing sources, a folder layout, date rules, and copy settings" loading="lazy" />
           <div class="corner br"></div>
-          <div class="cap">fig. 1 — pick your folders, scan, review, then copy.</div>
+          <div class="cap">fig. 1 · choose the folders, scan, review the plan, then copy.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- VIEWS -->
+  <section id="see">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Views</p>
+        <h2>Three views of the same plan.</h2>
+        <p>Each view scopes to whatever was selected, so the folder tree, Timeline and Gallery show only those files. In the two walkable views: click to take the mouse, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, <kbd>Esc</kbd> to release it.</p>
+      </div>
+
+      <div class="filmstrip">
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">01 / TIMELINE</div>
+            <h3>The plan in three dimensions</h3>
+            <p>One point per date each source reported, coloured by confidence. Three layouts morph into one another: a disagreement field, a time helix, and a memory terrain. Detail follows distance, from muted dots at range to the photographs themselves up close.</p>
+            <div class="kbdrow"><kbd>click to fly</kbd><kbd>auto‑fly</kbd></div>
+          </div>
+          <div class="sprockets bottom"></div>
+        </div>
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">02 / GALLERY</div>
+            <h3>Rooms built from the archive</h3>
+            <p>One room per period, oldest first, with a longer hall for a busy year. Pictures hang at eye height, videos play in frame, and daylight falls through a clerestory band. Rooms open into one another as a single enfilade.</p>
+            <div class="kbdrow"><kbd>W A S D</kbd><kbd>E</kbd> open</div>
+          </div>
+          <div class="sprockets bottom"></div>
+        </div>
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">03 / CHARTS</div>
+            <h3>The same questions in two dimensions</h3>
+            <p>A square per month, year by year: click to go finer, drag for a range. Alongside it, time of day, which source supplied each date, how confident eonsort is, and where the bulk of the files lands. Any selection scopes the whole application.</p>
+            <div class="kbdrow"><kbd>click</kbd><kbd>drag range</kbd></div>
+          </div>
+          <div class="sprockets bottom"></div>
+        </div>
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">04 / SEARCH</div>
+            <h3>Search pictures by content</h3>
+            <p>Optional. Once a scan has finished, pictures are tagged in the background, so the scan itself is never held up. Enter <code>forest and dog</code> in ordinary words and every view narrows to the pictures that match, ranked by how well. The model runs locally on the CPU.</p>
+            <div class="kbdrow"><kbd>Enter</kbd><kbd>Clear</kbd></div>
+          </div>
+          <div class="sprockets bottom"></div>
         </div>
       </div>
     </div>
@@ -615,7 +630,7 @@
         <div class="guarantee reveal">
           <span class="chk">✓</span>
           <h4>Nothing is overwritten</h4>
-          <p>Same‑name files are compared by content; identical ones are left alone, different ones stored beside as <code>_dup_1</code>.</p>
+          <p>Same‑name files are compared by content. Identical ones are left alone, different ones are stored beside them as <code>_dup_1</code>.</p>
         </div>
         <div class="guarantee reveal">
           <span class="chk">✓</span>
@@ -625,12 +640,12 @@
         <div class="guarantee reveal">
           <span class="chk">✓</span>
           <h4>Everything resumes</h4>
-          <p>The scan appends to its plan, the copy keeps a journal. Losing power costs nothing.</p>
+          <p>The scan appends to its plan and the copy keeps a journal. Stopping a run, or losing power, costs nothing.</p>
         </div>
         <div class="guarantee reveal">
           <span class="chk">✓</span>
           <h4>Sources stay untouched</h4>
-          <p>Your originals are read to plan the move — never written, moved, or deleted.</p>
+          <p>Originals are read in order to plan the copy. They are never written, moved, or deleted.</p>
         </div>
       </div>
     </div>
@@ -642,9 +657,9 @@
   <section id="download">
     <div class="wrap">
       <div class="section-head reveal">
-        <p class="eyebrow">Get it — v0.0.2</p>
+        <p class="eyebrow">Download · v0.0.5</p>
         <h2>Pick your platform.</h2>
-        <p>Free and open source, MIT licensed. Installers below, or build it yourself from source.</p>
+        <p>Free and open source under the MIT license. Installers are below, or build it yourself from source.</p>
       </div>
 
       <div class="reveal">
@@ -656,25 +671,25 @@
 
         <div class="os-panel" id="panel-windows">
           <div class="dl-list">
-            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.2/Eonsort_0.0.2_x64-setup.exe"><span class="name">Eonsort_0.0.2_x64-setup.exe</span><span class="size">recommended · NSIS installer</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.2/Eonsort_0.0.2_x64_en-US.msi"><span class="name">Eonsort_0.0.2_x64_en-US.msi</span><span class="size">MSI installer</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.2/eonsort-windows-x64-portable.zip"><span class="name">eonsort-windows-x64-portable.zip</span><span class="size">no install</span></a>
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.5/Eonsort_0.0.5_x64-setup.exe"><span class="name">Eonsort_0.0.5_x64-setup.exe</span><span class="size">recommended · NSIS installer</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.5/Eonsort_0.0.5_x64_en-US.msi"><span class="name">Eonsort_0.0.5_x64_en-US.msi</span><span class="size">MSI installer</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.5/eonsort-windows-x64-portable.zip"><span class="name">eonsort-windows-x64-portable.zip</span><span class="size">no install</span></a>
           </div>
         </div>
         <div class="os-panel" id="panel-mac">
           <div class="dl-list">
-            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.2/Eonsort_0.0.2_aarch64.dmg"><span class="name">Eonsort_0.0.2_aarch64.dmg</span><span class="size">recommended · Apple Silicon</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.2/Eonsort_0.0.2_x64.dmg"><span class="name">Eonsort_0.0.2_x64.dmg</span><span class="size">Intel</span></a>
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.5/Eonsort_0.0.5_aarch64.dmg"><span class="name">Eonsort_0.0.5_aarch64.dmg</span><span class="size">recommended · Apple Silicon</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.5/Eonsort_0.0.5_x64.dmg"><span class="name">Eonsort_0.0.5_x64.dmg</span><span class="size">Intel</span></a>
           </div>
         </div>
         <div class="os-panel" id="panel-linux">
           <div class="dl-list">
-            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.2/Eonsort_0.0.2_amd64.AppImage"><span class="name">Eonsort_0.0.2_amd64.AppImage</span><span class="size">recommended · runs anywhere</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.2/Eonsort_0.0.2_amd64.deb"><span class="name">Eonsort_0.0.2_amd64.deb</span><span class="size">Debian / Ubuntu</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.2/Eonsort-0.0.2-1.x86_64.rpm"><span class="name">Eonsort-0.0.2-1.x86_64.rpm</span><span class="size">Fedora / RHEL</span></a>
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.5/Eonsort_0.0.5_amd64.AppImage"><span class="name">Eonsort_0.0.5_amd64.AppImage</span><span class="size">recommended · runs anywhere</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.5/Eonsort_0.0.5_amd64.deb"><span class="name">Eonsort_0.0.5_amd64.deb</span><span class="size">Debian / Ubuntu</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.5/Eonsort-0.0.5-1.x86_64.rpm"><span class="name">Eonsort-0.0.5-1.x86_64.rpm</span><span class="size">Fedora / RHEL</span></a>
           </div>
         </div>
-        <p class="all-releases">Checksums, older versions, and CLI‑only tarballs on the <a href="https://github.com/it-atelier-gn/eonsort/releases" target="_blank" rel="noopener">releases page ↗</a></p>
+        <p class="all-releases">Checksums, earlier versions, and CLI‑only tarballs are on the <a href="https://github.com/it-atelier-gn/eonsort/releases" target="_blank" rel="noopener">releases page ↗</a></p>
       </div>
 
       <div class="cli-block reveal">
@@ -685,7 +700,7 @@
             <span class="dotb" style="background:#f2b840"></span>
             <span class="dotb" style="background:#38c4f2"></span>
           </div>
-          <pre><span class="c"># scan, review, then copy — for scheduled jobs and very large archives</span>
+          <pre><span class="c"># scan, review, then copy, for scheduled jobs and very large archives</span>
 <span class="p">$</span> eonsort sort --source <span class="p">"D:\Photos"</span> --destination <span class="p">"E:\Sorted"</span>
 
 <span class="c"># or run the phases separately</span>
@@ -702,8 +717,7 @@
 <footer>
   <div class="wrap foot-grid">
     <div>
-      <div class="foot-brand"><b>eonsort</b> — sort files by the date that's actually true.</div>
-      <div class="case-closed">CASE CLOSED</div>
+      <div class="foot-brand"><b>eonsort</b> · sort files by the date they were actually made.</div>
     </div>
     <div class="foot-links">
       <a href="https://github.com/it-atelier-gn/eonsort" target="_blank" rel="noopener">GitHub</a>
@@ -718,9 +732,15 @@
   // ambient drifting metadata fragments
   (function(){
     var frags = [
-      "DateTimeOriginal", "IMG_20230506_101112.jpg", "mvhd · MP4", "ctime",
-      "Screenshot 2021-07-04", "Rechnung_06.05.2021.pdf", "ImageDescription",
-      "ModifyDate", "0x0132 EXIF", "VID_20190514_092203.mp4", "birthtime",
+      "IMG_20230506_101112.jpg", "DateTimeOriginal", "Rechnung_06.05.2021.pdf",
+      "Facture 2021-05-06.pdf", "Factura_06-05-2021.pdf", "mvhd · MP4",
+      "Fattura_2021_05_06.pdf", "Skärmbild 2021-07-04.png", "請求書_20210506.pdf",
+      "ctime", "发票_20210506.pdf", "Счёт_2021-05-06.pdf",
+      "Screenshot 2021-07-04.png", "영수증_2021-05-06.jpg", "Nota_fiscal_2021-05-06.pdf",
+      "ModifyDate", "Fatura_06.05.2021.pdf", "Τιμολόγιο_2021-05-06.pdf",
+      "فاتورة_2021-05-06.pdf", "Kvittering_06.05.2021.pdf",
+      "VID_20190514_092203.mp4", "Számla_2021-05-06.pdf", "Lasku_2021-05-06.pdf",
+      "Hóa-đơn_2021-05-06.pdf", "0x0132 EXIF", "birthtime",
       "factory reset · 2000-01-01"
     ];
     var field = document.getElementById('driftField');
