@@ -34,8 +34,14 @@ Windows, Linux and macOS — desktop app and `eonsort` command line tool.
 | **File name** | `IMG_20230506_101112.jpg`, `Screenshot 2021-07-04 at 09.05.01.png`, `Rechnung 06.05.2021.pdf`, and many more shapes |
 | **EXIF** | `DateTimeOriginal` and friends in JPEG, TIFF, PNG, WebP, HEIF and common raw formats |
 | **Media** | `com.apple.quicktime.creationdate` where a phone wrote one, otherwise the `mvhd` box of MP4, MOV, M4A and related containers |
+| **XMP sidecar** | `exif:DateTimeOriginal`, `photoshop:DateCreated` or `xmp:CreateDate` in the `.xmp` a raw developer writes beside a picture |
 | **Google Takeout** | `photoTakenTime` in the JSON sidecar a Google Photos export leaves beside each file |
 | **File system** | Whichever of created / modified is older |
+
+A raw developer keeps its work in an `.xmp` beside the picture, either `IMG_1234.xmp` as Lightroom
+writes it or `IMG_1234.CR2.xmp` as darktable does. That file carries the date the photographer
+settled on, so it is trusted above the camera's own tag: a date corrected in Lightroom is a
+deliberate decision, while the EXIF block still holds whatever the camera thought at the time.
 
 A Google Photos export is the most common way a collection loses its dates: Takeout strips the
 capture time out of the file and parks it in a sidecar. Eonsort reads that sidecar back, including

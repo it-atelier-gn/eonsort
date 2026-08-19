@@ -24,6 +24,7 @@
     { id: "filename", label: "File name", hint: "Dates written into the name" },
     { id: "exif", label: "EXIF", hint: "Camera metadata in photos" },
     { id: "media", label: "Media", hint: "Recording time in videos" },
+    { id: "xmp", label: "XMP sidecar", hint: "The .xmp a raw developer writes beside a picture" },
     { id: "takeout", label: "Google Takeout", hint: "The JSON sidecar an export leaves behind" },
     { id: "filesystem", label: "File system", hint: "Created / modified time" },
   ];
