@@ -3,6 +3,7 @@ mod filename;
 mod filesystem;
 mod media;
 pub mod takeout;
+pub mod windows;
 pub mod xmp;
 
 use crate::suspect::{self, Flag};
@@ -22,25 +23,28 @@ pub enum Provider {
     Media,
     Xmp,
     Takeout,
+    Windows,
     Filesystem,
 }
 
 impl Provider {
-    pub const ALL: [Provider; 6] = [
+    pub const ALL: [Provider; 7] = [
         Provider::Filename,
         Provider::Exif,
         Provider::Media,
         Provider::Xmp,
         Provider::Takeout,
+        Provider::Windows,
         Provider::Filesystem,
     ];
 
-    pub const DEFAULT: [Provider; 6] = [
+    pub const DEFAULT: [Provider; 7] = [
         Provider::Filename,
         Provider::Exif,
         Provider::Media,
         Provider::Xmp,
         Provider::Takeout,
+        Provider::Windows,
         Provider::Filesystem,
     ];
 
@@ -51,6 +55,7 @@ impl Provider {
             Provider::Media => "media",
             Provider::Xmp => "xmp",
             Provider::Takeout => "takeout",
+            Provider::Windows => "windows",
             Provider::Filesystem => "filesystem",
         }
     }
@@ -60,6 +65,7 @@ impl Provider {
             Provider::Xmp => 42,
             Provider::Exif | Provider::Media => 40,
             Provider::Takeout => 38,
+            Provider::Windows => 36,
             Provider::Filename => 30,
             Provider::Filesystem => 10,
         }
@@ -131,11 +137,23 @@ pub struct Resolved {
 pub fn detect_all(path: &Path, meta: &Metadata, providers: &[Provider]) -> Vec<Detection> {
     let mut found: Vec<Detection> = providers
         .iter()
+        .filter(|p| **p != Provider::Windows)
         .filter_map(|p| run(*p, path, meta))
         .collect();
+
+    if providers.contains(&Provider::Windows) && !dated_by_content(&found) {
+        found.extend(run(Provider::Windows, path, meta));
+    }
+
     found.sort_by_key(|d| d.provider);
     found.dedup_by_key(|d| d.provider);
     found
+}
+
+fn dated_by_content(found: &[Detection]) -> bool {
+    found
+        .iter()
+        .any(|d| !matches!(d.provider, Provider::Filesystem | Provider::Windows))
 }
 
 pub fn choose(
@@ -207,6 +225,7 @@ fn run(provider: Provider, path: &Path, meta: &Metadata) -> Option<Detection> {
         Provider::Media => media::detect(path),
         Provider::Xmp => xmp::detect(path),
         Provider::Takeout => takeout::detect(path),
+        Provider::Windows => windows::detect(path),
         Provider::Filesystem => filesystem::detect(meta),
     }
 }
@@ -268,6 +287,31 @@ mod tests {
         let found = detect(&path, &meta, &DetectOptions::default()).unwrap();
         assert_eq!(found.provider, Provider::Filename);
         assert_eq!(found.taken, at(2005, 1, 2, 3, 4, 5));
+    }
+
+    #[test]
+    fn the_windows_properties_are_only_asked_when_nothing_else_knew() {
+        let dir = tempdir().unwrap();
+        let named = write(dir.path(), "IMG_20050102_030405.dat");
+        let plain = write(dir.path(), "holiday.dat");
+
+        let asked = |path: &Path| {
+            let meta = fs::metadata(path).unwrap();
+            detect_all(path, &meta, &Provider::ALL)
+                .iter()
+                .any(|d| d.provider == Provider::Windows)
+        };
+
+        assert!(!asked(&named));
+        assert!(!dated_by_content(&[detection(
+            Provider::Filesystem,
+            at(2019, 1, 1, 0, 0, 0)
+        )]));
+        assert!(dated_by_content(&[detection(
+            Provider::Exif,
+            at(2019, 1, 1, 0, 0, 0)
+        )]));
+        let _ = plain;
     }
 
     #[test]

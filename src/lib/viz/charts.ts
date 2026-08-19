@@ -7,6 +7,7 @@ export const PROVIDER_ORDER: Provider[] = [
   "media",
   "xmp",
   "takeout",
+  "windows",
   "filesystem",
 ];
 
@@ -16,6 +17,7 @@ export const PROVIDER_LABEL: Record<Provider, string> = {
   media: "Media",
   xmp: "XMP sidecar",
   takeout: "Google Takeout",
+  windows: "Windows properties",
   filesystem: "File system",
 };
 
@@ -25,6 +27,7 @@ export const PROVIDER_COLOUR: Record<Provider, string> = {
   media: "#199e70",
   xmp: "#4bb3a4",
   takeout: "#8a63d2",
+  windows: "#5b7fd4",
   filesystem: "#d55181",
 };
 

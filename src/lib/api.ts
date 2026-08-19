@@ -1,6 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Provider = "filename" | "exif" | "media" | "xmp" | "takeout" | "filesystem";
+export type Provider =
+  | "filename"
+  | "exif"
+  | "media"
+  | "xmp"
+  | "takeout"
+  | "windows"
+  | "filesystem";
 export type Strategy = "smart" | "oldest" | "priority";
 export type Confidence = "high" | "medium" | "low";
 

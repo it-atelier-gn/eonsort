@@ -36,6 +36,7 @@ Windows, Linux and macOS — desktop app and `eonsort` command line tool.
 | **Media** | `com.apple.quicktime.creationdate` where a phone wrote one, otherwise the `mvhd` box of MP4, MOV, M4A and related containers |
 | **XMP sidecar** | `exif:DateTimeOriginal`, `photoshop:DateCreated` or `xmp:CreateDate` in the `.xmp` a raw developer writes beside a picture |
 | **Google Takeout** | `photoTakenTime` in the JSON sidecar a Google Photos export leaves beside each file |
+| **Windows properties** | Windows only, last resort: `System.Photo.DateTaken` and `System.Media.DateEncoded` as Explorer shows them |
 | **File system** | Whichever of created / modified is older |
 
 A raw developer keeps its work in an `.xmp` beside the picture, either `IMG_1234.xmp` as Lightroom
@@ -48,6 +49,15 @@ capture time out of the file and parks it in a sidecar. Eonsort reads that sidec
 the shapes Takeout actually writes — `IMG_1234.JPG.json`, `IMG_1234.JPG.supplemental-metadata.json`,
 names cut short to fit its 51 character limit, `IMG_1234.JPG(1).json` beside a numbered copy, and an
 `-edited` picture falling back to the original's sidecar.
+
+On Windows, the Details tab in a file's properties is filled in by whatever property handler is
+registered for that file type, which is how Explorer dates formats no library here can parse: vendor
+raw files covered by an installed codec pack, ASF and WMV, and anything else a handler was installed
+for. Eonsort asks the same shell property store, but only for files no other source could date, so
+the cost falls on the handful of exotic files rather than on the whole scan. Each call runs on its
+own thread with a three second limit, so a slow or wedged handler is treated as "no date" rather
+than holding the scan up. It reads only genuine capture properties, never `System.ItemDate`, which
+quietly falls back to the file's modified time.
 
 Every source that reports a date is kept. Each can be switched off. Three rules choose between them:
 

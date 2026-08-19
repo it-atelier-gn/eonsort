@@ -54,7 +54,7 @@ struct ScanArgs {
     #[arg(long, default_value = DEFAULT_FOLDER_PATTERN)]
     pattern: String,
     /// Date sources to consult, in priority order.
-    #[arg(long, value_enum, num_args = 1.., default_values = ["filename", "exif", "media", "xmp", "takeout", "filesystem"])]
+    #[arg(long, value_enum, num_args = 1.., default_values = ["filename", "exif", "media", "xmp", "takeout", "windows", "filesystem"])]
     provider: Vec<ProviderArg>,
     /// How to choose between the dates different providers report.
     #[arg(long, value_enum, default_value = "smart")]
@@ -134,6 +134,7 @@ enum ProviderArg {
     Media,
     Xmp,
     Takeout,
+    Windows,
     Filesystem,
 }
 
@@ -145,6 +146,7 @@ impl From<ProviderArg> for Provider {
             ProviderArg::Media => Provider::Media,
             ProviderArg::Xmp => Provider::Xmp,
             ProviderArg::Takeout => Provider::Takeout,
+            ProviderArg::Windows => Provider::Windows,
             ProviderArg::Filesystem => Provider::Filesystem,
         }
     }
