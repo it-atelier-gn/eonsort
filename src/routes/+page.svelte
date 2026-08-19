@@ -3,6 +3,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import {
+    baseName,
     cancelJob,
     checkFolderPattern,
     clearDateOverride,
@@ -31,8 +32,12 @@
     setDestination,
     startScan,
     startVerify,
+    findBursts,
+    findDuplicates,
+    type BurstView,
     type CopyProgress,
     type CopyReport,
+    type DuplicateReport,
     type DateChoice,
     type EntryView,
     type FolderNode,
@@ -106,6 +111,23 @@
   let copyFailures = $state<CopyReport["failures"]>([]);
   let skipped = $state<SkippedView[]>([]);
   let issuesOpen = $state(false);
+  let copiesOpen = $state(false);
+  let copiesBusy = $state(false);
+  let duplicates = $state<DuplicateReport | null>(null);
+  let bursts = $state<BurstView[]>([]);
+
+  async function findCopies() {
+    copiesOpen = true;
+    copiesBusy = true;
+    try {
+      [duplicates, bursts] = await Promise.all([findDuplicates(), findBursts()]);
+    } catch (e) {
+      fail(String(e));
+      copiesOpen = false;
+    } finally {
+      copiesBusy = false;
+    }
+  }
 
   let notice = $state<string | null>(null);
   let error = $state<string | null>(null);
@@ -791,6 +813,46 @@
     />
   {/if}
 
+  {#if copiesOpen}
+    <section class="issues scroll">
+      <div class="issues-head">
+        <strong>Copies of the same picture</strong>
+        <button class="ghost" onclick={() => (copiesOpen = false)}>Close</button>
+      </div>
+      {#if copiesBusy}
+        <p class="faint">Reading every file to compare them…</p>
+      {:else}
+        {#if duplicates && duplicates.groups.length > 0}
+          <p>
+            <span class="badge warn">{formatBytes(duplicates.wasted)} in duplicates</span>
+            <span class="faint">
+              {duplicates.files} files hold the same bytes as another. Copying keeps only one of each
+              anyway, so this is what you save.
+            </span>
+          </p>
+          {#each duplicates.groups.slice(0, 200) as group (group.sources[0])}
+            <button class="suspect" onclick={() => marked = group.sources}>
+              <span class="badge info">{group.sources.length} identical</span>
+              <span class="reason">{formatBytes(group.wasted)} of it repeated.</span>
+              <span class="mono faint truncate">{group.folder}</span>
+              <span class="mono faint truncate">{group.sources.map(baseName).join(" · ")}</span>
+            </button>
+          {/each}
+        {:else if duplicates}
+          <p class="faint">No two files hold the same bytes.</p>
+        {/if}
+        {#each bursts.slice(0, 200) as burst (burst.keeper)}
+          <button class="suspect" onclick={() => marked = burst.members}>
+            <span class="badge info">{burst.members.length} near copies</span>
+            <span class="reason">One burst, {formatBytes(burst.extra_bytes)} beyond the first.</span>
+            <span class="mono faint truncate">{burst.folder}</span>
+            <span class="mono faint">{burst.taken}</span>
+          </button>
+        {/each}
+      {/if}
+    </section>
+  {/if}
+
   {#if issuesOpen}
     <section class="issues scroll">
       <div class="issues-head">
@@ -864,6 +926,10 @@
         {suspectCount} suspicious {suspectCount === 1 ? "date" : "dates"}
       </button>
     {/if}
+
+    <button class="ghost" onclick={() => (copiesOpen ? (copiesOpen = false) : findCopies())}>
+      Copies
+    </button>
 
     <button class="ghost" onclick={() => (issuesOpen = !issuesOpen)}>
       Issues {issueCount > 0 ? `(${issueCount})` : ""}

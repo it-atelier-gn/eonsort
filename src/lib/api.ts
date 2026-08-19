@@ -66,6 +66,27 @@ export interface FlagView {
   hard: boolean;
 }
 
+export interface DuplicateView {
+  sources: string[];
+  folder: string;
+  bytes: number;
+  wasted: number;
+}
+
+export interface DuplicateReport {
+  groups: DuplicateView[];
+  files: number;
+  wasted: number;
+}
+
+export interface BurstView {
+  keeper: string;
+  members: string[];
+  folder: string;
+  taken: string;
+  extra_bytes: number;
+}
+
 export interface EntryView {
   source: string;
   destination: string;
@@ -211,6 +232,10 @@ export const cancelJob = () => invoke<void>("cancel_job");
 export const startScan = (request: ScanRequest) => invoke<string>("start_scan", { request });
 export const startCopy = (jobs: number, preserveTimes: boolean, stampDate: boolean) =>
   invoke<void>("start_copy", { jobs, preserveTimes, stampDate });
+export const findDuplicates = () => invoke<DuplicateReport>("find_duplicates");
+
+export const findBursts = () => invoke<BurstView[]>("find_bursts");
+
 export const startVerify = (compareHashes: boolean) =>
   invoke<void>("start_verify", { compareHashes });
 export const openPlan = (path: string) => invoke<PlanSummary>("open_plan", { path });

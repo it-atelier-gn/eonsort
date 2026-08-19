@@ -195,6 +195,17 @@ Turns live in `*.rotations.json` beside the plan, and a copied file refuses to b
 caveat: the small thumbnail inside a photo's own EXIF block is left as it was, so a viewer showing
 that thumbnail may still show it sideways.
 
+## Copies of the same picture
+
+**Copies** in the status bar reads every file in the plan and reports two things. Files that hold
+exactly the same bytes are grouped, heaviest group first, with the space their repetition costs;
+files of the same length are compared by content, never taken for each other on size alone. Beneath
+that come bursts: runs of near-identical pictures taken seconds apart, found by comparing what they
+look like rather than what they contain.
+
+Clicking a group selects its files, so the preview and the bottom bar act on them. Nothing is
+deleted: eonsort only ever reads sources, and the copy already keeps one of each identical file.
+
 ## Writing the date onto the copy
 
 Tick **Write the chosen date into the copy** and every JPEG that already carries EXIF dates leaves

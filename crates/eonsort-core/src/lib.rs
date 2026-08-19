@@ -1,6 +1,7 @@
 pub mod companion;
 pub mod copy;
 pub mod dateparse;
+pub mod duplicates;
 pub mod error;
 pub mod exif_write;
 pub mod imageio;

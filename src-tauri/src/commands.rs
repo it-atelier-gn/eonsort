@@ -841,6 +841,57 @@ pub async fn thumbnail_for(path: PathBuf, edge: u32, rotate: Option<String>) -> 
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct DuplicateReport {
+    pub groups: Vec<DuplicateView>,
+    pub files: usize,
+    pub wasted: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateView {
+    pub sources: Vec<PathBuf>,
+    pub folder: String,
+    pub bytes: u64,
+    pub wasted: u64,
+}
+
+#[tauri::command]
+pub fn find_duplicates(state: State<'_, AppState>) -> Result<DuplicateReport, String> {
+    let files: Vec<(PathBuf, u64)> = {
+        let session = state.session.lock().unwrap();
+        let plan = session.plan.as_ref().ok_or("run a scan first")?;
+        plan.entries
+            .iter()
+            .map(|e| (e.source.clone(), e.size))
+            .collect()
+    };
+
+    let groups =
+        eonsort_core::duplicates::exact(&files, &state.cancel).map_err(|e| e.to_string())?;
+    let wasted = eonsort_core::duplicates::wasted(&groups);
+    let files = groups.iter().map(|group| group.sources.len()).sum();
+
+    Ok(DuplicateReport {
+        groups: groups
+            .into_iter()
+            .map(|group| DuplicateView {
+                folder: group
+                    .sources
+                    .first()
+                    .and_then(|s| s.parent())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                bytes: group.bytes,
+                wasted: group.wasted,
+                sources: group.sources,
+            })
+            .collect(),
+        files,
+        wasted,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct BurstView {
     pub keeper: PathBuf,
     pub members: Vec<PathBuf>,

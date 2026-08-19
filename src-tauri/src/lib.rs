@@ -37,6 +37,7 @@ pub fn run() {
             commands::preview_file,
             commands::thumbnail_for,
             commands::find_bursts,
+            commands::find_duplicates,
             commands::set_excluded,
             commands::upright_model_status,
             commands::install_upright_model,
