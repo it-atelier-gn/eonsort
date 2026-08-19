@@ -1,18 +1,36 @@
 use super::Detection;
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Local, NaiveDateTime};
+use std::fs::Metadata;
 use std::path::Path;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 const HANDLER_TIMEOUT: Duration = Duration::from_secs(3);
+const SAME_MOMENT_SECONDS: i64 = 2;
 
-pub fn detect(path: &Path) -> Option<Detection> {
+pub fn detect(path: &Path, meta: &Metadata) -> Option<Detection> {
     let (name, taken) = behind_a_timeout(path)?;
+    if echoes_the_file(taken, meta) {
+        return None;
+    }
+
     Some(Detection {
         provider: super::Provider::System,
         info: Some(name),
         taken,
     })
+}
+
+fn echoes_the_file(taken: NaiveDateTime, meta: &Metadata) -> bool {
+    [meta.created().ok(), meta.modified().ok()]
+        .into_iter()
+        .flatten()
+        .filter_map(wall_clock)
+        .any(|stamp| (stamp - taken).num_seconds().abs() <= SAME_MOMENT_SECONDS)
+}
+
+fn wall_clock(time: SystemTime) -> Option<NaiveDateTime> {
+    Some(DateTime::<Local>::from(time).naive_local())
 }
 
 fn behind_a_timeout(path: &Path) -> Option<(String, NaiveDateTime)> {
@@ -271,30 +289,59 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    fn at(y: i32, m: u32, d: u32, hh: u32, mm: u32, ss: u32) -> NaiveDateTime {
+        chrono::NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(hh, mm, ss)
+            .unwrap()
+    }
+
     #[test]
     fn a_file_with_nothing_to_read_says_nothing() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("notes.txt");
         fs::write(&path, b"no dates in here").unwrap();
+        let meta = fs::metadata(&path).unwrap();
 
-        assert!(detect(&path).is_none());
+        assert!(detect(&path, &meta).is_none());
     }
 
     #[test]
     fn a_file_that_is_not_there_says_nothing() {
-        assert!(detect(Path::new("/nowhere/at/all.jpg")).is_none());
+        let dir = tempdir().unwrap();
+        let stand_in = dir.path().join("present.txt");
+        fs::write(&stand_in, b"x").unwrap();
+        let meta = fs::metadata(&stand_in).unwrap();
+
+        assert!(detect(Path::new("/nowhere/at/all.jpg"), &meta).is_none());
     }
 
-    #[cfg(windows)]
     #[test]
-    fn a_picture_the_shell_can_date_is_read_through_it() {
+    fn a_date_that_only_repeats_the_file_times_is_not_worth_reporting() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plain.txt");
+        fs::write(&path, b"x").unwrap();
+        let meta = fs::metadata(&path).unwrap();
+
+        let modified = wall_clock(meta.modified().unwrap()).unwrap();
+        assert!(echoes_the_file(modified, &meta));
+        assert!(echoes_the_file(
+            modified + chrono::TimeDelta::seconds(SAME_MOMENT_SECONDS),
+            &meta
+        ));
+        assert!(!echoes_the_file(at(2003, 1, 1, 0, 0, 12), &meta));
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn a_picture_the_desktop_can_date_is_read_through_it() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("dated.jpg");
         fs::write(&path, crate::exif_write::jpeg_with_exif(64, 32, 1)).unwrap();
+        let meta = fs::metadata(&path).unwrap();
 
-        let found = detect(&path).expect("the shell should date a jpeg carrying EXIF");
+        let found = detect(&path, &meta).expect("the desktop should date a jpeg carrying EXIF");
         assert_eq!(found.provider, super::super::Provider::System);
-        assert_eq!(found.info.as_deref(), Some("System.Photo.DateTaken"));
         assert_eq!(
             found.taken,
             chrono::NaiveDate::from_ymd_opt(2003, 1, 1)

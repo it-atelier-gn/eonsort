@@ -225,7 +225,7 @@ fn run(provider: Provider, path: &Path, meta: &Metadata) -> Option<Detection> {
         Provider::Media => media::detect(path),
         Provider::Xmp => xmp::detect(path),
         Provider::Takeout => takeout::detect(path),
-        Provider::System => system::detect(path),
+        Provider::System => system::detect(path, meta),
         Provider::Filesystem => filesystem::detect(meta),
     }
 }

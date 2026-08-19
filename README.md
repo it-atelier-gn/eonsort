@@ -59,8 +59,10 @@ by Spotlight and its `.mdimporter` plugins, and `mdls` shows exactly what eonsor
 Eonsort asks either one only for files no other source could date, so the cost falls on a handful of
 exotic files rather than on the whole scan. Each call runs on its own thread with a three second
 limit, so a slow or wedged handler reads as "no date" rather than holding the scan up. Only genuine
-capture properties are read: `System.ItemDate` is skipped because it quietly falls back to the
-file's modified time.
+capture properties are read, and an answer that merely repeats the file's own created or modified
+time is discarded rather than reported: `System.ItemDate` on Windows and
+`kMDItemContentCreationDate` on macOS both fall back to the file times when a file carries no
+metadata of its own, and a source that only echoes the file system is not a source.
 
 Linux has no counterpart worth reading. Tracker and Baloo are the nearest thing, but they are
 desktop indexers rather than a system service: absent on servers, often not indexing the folder you
