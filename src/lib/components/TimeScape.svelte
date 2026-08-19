@@ -18,7 +18,7 @@
     | { kind: "video"; url: string }
     | { kind: "none" };
 
-  const THUMBNAIL_EDGE = 320;
+  const THUMBNAIL_EDGE = 512;
   const PLAY_SIZE = 0.16;
   const MAX_IN_FLIGHT = 6;
 

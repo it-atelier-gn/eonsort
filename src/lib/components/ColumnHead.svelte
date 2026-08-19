@@ -1,46 +1,47 @@
-<script lang="ts">
-  import { COLUMNS, isColumnId, moveColumn, type ColumnId } from "$lib/columns";
+<script lang="ts" generics="Id extends string">
+  import { columnOf, isColumnId, moveColumn, type ColumnSet } from "$lib/columns";
 
   interface Props {
-    order: ColumnId[];
+    set: ColumnSet<Id>;
+    order: Id[];
     grid: string;
-    onReorder: (order: ColumnId[]) => void;
-    onResize: (id: ColumnId, width: number | null) => void;
+    onReorder: (order: Id[]) => void;
+    onResize: (id: Id, width: number | null) => void;
   }
 
-  let { order, grid, onReorder, onResize }: Props = $props();
+  let { set, order, grid, onReorder, onResize }: Props = $props();
 
   const STEP = 8;
 
-  let dragging = $state<ColumnId | null>(null);
-  let over = $state<ColumnId | null>(null);
-  let sizing = $state<{ id: ColumnId; from: number; width: number } | null>(null);
+  let dragging = $state<Id | null>(null);
+  let over = $state<Id | null>(null);
+  let sizing = $state<{ id: Id; from: number; width: number } | null>(null);
 
-  function start(event: DragEvent, id: ColumnId) {
+  function start(event: DragEvent, id: Id) {
     dragging = id;
     event.dataTransfer?.setData("text/plain", id);
     if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
   }
 
-  function drop(event: DragEvent, id: ColumnId) {
+  function drop(event: DragEvent, id: Id) {
     event.preventDefault();
     const held = dragging ?? event.dataTransfer?.getData("text/plain");
     dragging = null;
     over = null;
-    if (isColumnId(held) && held !== id) onReorder(moveColumn(order, held, id));
+    if (isColumnId(set, held) && held !== id) onReorder(moveColumn(set, order, held, id));
   }
 
-  function nudge(id: ColumnId, by: number) {
+  function nudge(id: Id, by: number) {
     const at = order.indexOf(id);
     const target = order[at + by];
-    if (target) onReorder(moveColumn(order, id, target));
+    if (target) onReorder(moveColumn(set, order, id, target));
   }
 
   function cellWidth(grip: HTMLElement): number {
     return grip.parentElement?.getBoundingClientRect().width ?? 0;
   }
 
-  function grab(event: PointerEvent, id: ColumnId) {
+  function grab(event: PointerEvent, id: Id) {
     const grip = event.currentTarget as HTMLElement;
     event.preventDefault();
     event.stopPropagation();
@@ -60,7 +61,7 @@
     sizing = null;
   }
 
-  function stretch(event: KeyboardEvent, id: ColumnId) {
+  function stretch(event: KeyboardEvent, id: Id) {
     const by = event.key === "ArrowLeft" ? -STEP : event.key === "ArrowRight" ? STEP : 0;
     if (by === 0) return;
     event.preventDefault();
@@ -73,7 +74,7 @@
   {#each order as id (id)}
     <span
       class="cap"
-      class:right={COLUMNS[id].align === "right"}
+      class:right={columnOf(set, id).align === "right"}
       class:over={over === id && dragging !== id}
       class:held={dragging === id}
       role="columnheader"
@@ -102,12 +103,12 @@
         }
       }}
     >
-      {COLUMNS[id].label}
+      {columnOf(set, id).label}
       <button
         type="button"
         class="grip"
         class:sizing={sizing?.id === id}
-        aria-label="Resize the {COLUMNS[id].label} column"
+        aria-label="Resize the {columnOf(set, id).label} column"
         title="Drag to resize, or double click to fit"
         draggable="false"
         ondragstart={(e) => {

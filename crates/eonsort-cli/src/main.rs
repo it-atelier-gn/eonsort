@@ -3,7 +3,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use eonsort_core::copy::{self, CopyOptions, CopyProgress};
 use eonsort_core::model::DEFAULT_FOLDER_PATTERN;
 use eonsort_core::overrides;
-use eonsort_core::providers::{DetectOptions, Provider, Strategy};
+use eonsort_core::providers::{clamp_weight, DetectOptions, Provider, Strategy, Weights};
 use eonsort_core::scan::{ScanOptions, ScanPhase, ScanProgress};
 use eonsort_core::suspect::{self, EntryFacts, Flag, Severity};
 use eonsort_core::verify::{VerifyOptions, VerifyProgress, VerifyReport};
@@ -59,6 +59,9 @@ struct ScanArgs {
     /// How to choose between the dates different providers report.
     #[arg(long, value_enum, default_value = "smart")]
     strategy: StrategyArg,
+    /// How much a source counts when the smart strategy weighs them, as source=0..100.
+    #[arg(long, value_parser = parse_weight)]
+    weight: Vec<(ProviderArg, i64)>,
     /// Follow symbolic links while walking the sources.
     #[arg(long)]
     follow_symlinks: bool,
@@ -127,7 +130,7 @@ struct ShowArgs {
     suspect: bool,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum ProviderArg {
     Filename,
     Exif,
@@ -219,8 +222,25 @@ fn install_cancel_handler() -> Result<Arc<AtomicBool>> {
     Ok(cancel)
 }
 
+fn parse_weight(text: &str) -> Result<(ProviderArg, i64), String> {
+    let (name, weight) = text
+        .split_once('=')
+        .ok_or_else(|| format!("expected a source and a weight, as exif=45, not {text}"))?;
+    let provider = ProviderArg::from_str(name, true)?;
+    let weight: i64 = weight
+        .trim()
+        .parse()
+        .map_err(|_| format!("{weight} is not a whole number"))?;
+    Ok((provider, clamp_weight(weight)))
+}
+
 fn run_scan(args: &ScanArgs, cancel: &AtomicBool) -> Result<(PathBuf, u64)> {
     let providers: Vec<Provider> = args.provider.iter().map(|p| (*p).into()).collect();
+    let weights: Weights = args
+        .weight
+        .iter()
+        .map(|(provider, weight)| ((*provider).into(), *weight))
+        .collect();
 
     let options = ScanOptions {
         sources: args.source.clone(),
@@ -229,6 +249,7 @@ fn run_scan(args: &ScanArgs, cancel: &AtomicBool) -> Result<(PathBuf, u64)> {
         detect: DetectOptions {
             providers,
             strategy: args.strategy.into(),
+            weights,
         },
         follow_symlinks: args.follow_symlinks,
         auto_rotate: args.auto_rotate,
@@ -465,6 +486,16 @@ mod tests {
         assert_eq!(human_bytes(512), "512 B");
         assert_eq!(human_bytes(2048), "2.00 KB");
         assert_eq!(human_bytes(5 * 1024 * 1024), "5.00 MB");
+    }
+
+    #[test]
+    fn a_weight_is_read_as_a_source_and_a_number() {
+        assert_eq!(parse_weight("exif=45").unwrap(), (ProviderArg::Exif, 45));
+        assert_eq!(parse_weight("exif=900").unwrap().1, 100);
+        assert_eq!(parse_weight("exif=-5").unwrap().1, 0);
+        assert!(parse_weight("exif").is_err());
+        assert!(parse_weight("nowhere=10").is_err());
+        assert!(parse_weight("exif=soon").is_err());
     }
 
     #[test]

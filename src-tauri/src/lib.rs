@@ -14,6 +14,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
+            commands::open_sources_window,
             commands::check_folder_pattern,
             commands::cancel_job,
             commands::start_scan,
@@ -44,6 +45,9 @@ pub fn run() {
             commands::cancel_upright_install,
             commands::guess_upright,
             commands::tag_model_status,
+            commands::quality_model_status,
+            commands::install_quality_model,
+            commands::cancel_quality_install,
             commands::install_tag_model,
             commands::cancel_tag_install,
             commands::start_tagging,

@@ -2,18 +2,31 @@ import { describe, expect, it } from "vitest";
 import type { EntryView } from "$lib/api";
 import {
   buildGallery,
+  corridorLamps,
   groupIntoPeriods,
   hangingSlots,
+  holds,
+  lampsFor,
+  nearestLamps,
+  overlaps,
+  randomFrom,
   roomAt,
-  roomDepth,
+  roomSize,
+  runsOf,
+  seedFrom,
   thinTo,
+  ART_PITCH,
+  DOOR_HEIGHT,
   DOOR_WIDTH,
-  MAX_DEPTH,
   MAX_ROOMS,
-  MIN_DEPTH,
-  ROOM_WIDTH,
+  MAX_SIDE,
+  MIN_SIDE,
+  ROOM_HEIGHT,
+  WALL,
+  type Gallery,
+  type Solid,
 } from "./layout";
-import { buildPaneQuads, buildRoomMesh, buildShaftQuads } from "./geometry";
+import { buildPaneQuads, buildRoomMesh, buildShaftQuads, type Mesh } from "./geometry";
 import { blocked, eyeTarget, look, slide, step, MAX_PITCH, RADIUS } from "./walk";
 
 const at = (iso: string) => Date.parse(`${iso}Z`) / 1000;
@@ -57,6 +70,47 @@ const years = (...list: [string, number][]) =>
     ),
   );
 
+function reaches(gallery: Gallery, from: { x: number; z: number }, to: { x: number; z: number }) {
+  const grid = 0.5;
+  const key = (x: number, z: number) => `${Math.round(x / grid)}:${Math.round(z / grid)}`;
+  const seen = new Set<string>([key(from.x, from.z)]);
+  const queue = [{ x: from.x, z: from.z }];
+
+  while (queue.length > 0) {
+    const spot = queue.shift()!;
+    if (Math.hypot(spot.x - to.x, spot.z - to.z) < 1.2) return true;
+
+    for (const [dx, dz] of [
+      [grid, 0],
+      [-grid, 0],
+      [0, grid],
+      [0, -grid],
+    ]) {
+      const x = spot.x + dx;
+      const z = spot.z + dz;
+      const id = key(x, z);
+      if (seen.has(id)) continue;
+      if (!holds(gallery.bounds, x, z, 2)) continue;
+      if (blocked(x, z, gallery.solids)) continue;
+      seen.add(id);
+      queue.push({ x, z });
+    }
+  }
+  return false;
+}
+
+const centreOf = (area: Solid) => ({ x: (area.x0 + area.x1) / 2, z: (area.z0 + area.z1) / 2 });
+
+function facesAt(mesh: Mesh, axis: 0 | 1 | 2, at: number, direction: number): number {
+  let found = 0;
+  for (let i = 0; i < mesh.count; i += 1) {
+    if (Math.abs(mesh.position[i * 3 + axis] - Math.fround(at)) > 1e-3) continue;
+    if (Math.abs(mesh.normal[i * 3 + axis] - direction) > 1e-6) continue;
+    found += 1;
+  }
+  return found;
+}
+
 describe("gallery layout", () => {
   it("gives each year its own room, oldest first", () => {
     const periods = groupIntoPeriods(years(["2021", 2], ["2003", 1], ["2019", 3]));
@@ -69,45 +123,136 @@ describe("gallery layout", () => {
       entry({ source: "/b", taken_epoch: at("2019-08-01T00:00:00") }),
       entry({ source: "/a", taken_epoch: at("2019-02-01T00:00:00") }),
     ];
-    const periods = groupIntoPeriods(entries);
-    expect(periods[0].entries).toEqual([1, 0]);
+    expect(groupIntoPeriods(entries)[0].entries).toEqual([1, 0]);
   });
 
   it("grows a room for a busy year but keeps it inside sane bounds", () => {
-    expect(roomDepth(1)).toBe(MIN_DEPTH);
-    expect(roomDepth(400)).toBe(MAX_DEPTH);
-    expect(roomDepth(20)).toBeGreaterThan(roomDepth(6));
+    expect(roomSize(1, 1).width).toBe(MIN_SIDE);
+    expect(roomSize(400, 1).width).toBe(MAX_SIDE);
+    expect(roomSize(30, 1).width).toBeGreaterThan(roomSize(8, 1).width);
+    expect(roomSize(30, 1.4).width).toBeGreaterThan(roomSize(30, 1.4).depth);
   });
 
-  it("never hangs more pictures than the walls hold", () => {
-    const gallery = buildGallery(years(["2019", 500]));
-    const room = gallery.rooms[0];
-    expect(room.files).toBe(500);
-    expect(room.hung).toBeLessThanOrEqual(hangingSlots(room.z1 - room.z0));
-    expect(room.frames).toHaveLength(room.hung);
-    expect(room.hung).toBeGreaterThan(0);
+  it("draws the same building twice for the same files, another for other files", () => {
+    const entries = years(["2003", 8], ["2019", 30], ["2021", 12]);
+    const once = buildGallery(entries);
+    const again = buildGallery(entries);
+    const other = buildGallery(years(["2003", 9], ["2019", 31], ["2021", 13]));
+
+    expect(once.rooms.map((room) => [room.x0, room.z0])).toEqual(
+      again.rooms.map((room) => [room.x0, room.z0]),
+    );
+    expect(other.rooms.map((room) => [room.x0, room.z0])).not.toEqual(
+      once.rooms.map((room) => [room.x0, room.z0]),
+    );
+    expect(seedFrom(entries)).toBe(seedFrom(entries));
   });
 
-  it("keeps every picture inside its own room and flat against a wall", () => {
-    const gallery = buildGallery(years(["2003", 6], ["2019", 30]));
-    const half = ROOM_WIDTH / 2;
+  it("hands out the same numbers for the same seed", () => {
+    const first = randomFrom(7);
+    const second = randomFrom(7);
+    const drawn = [first(), first(), first()];
+    expect(drawn).toEqual([second(), second(), second()]);
+    expect(drawn.every((value) => value >= 0 && value < 1)).toBe(true);
+  });
 
-    for (const room of gallery.rooms) {
-      for (const frame of room.frames) {
-        expect(Math.abs(frame.x)).toBeLessThan(half);
-        expect(Math.abs(frame.x)).toBeGreaterThan(half - 0.5);
-        expect(frame.z).toBeGreaterThanOrEqual(room.z0);
-        expect(frame.z).toBeLessThanOrEqual(room.z1);
-        expect(Math.sign(frame.facing)).toBe(-Math.sign(frame.x));
+  it("never lets two rooms stand in the same place", () => {
+    const gallery = buildGallery(
+      years(["2015", 40], ["2016", 8], ["2017", 90], ["2018", 20], ["2019", 60], ["2020", 12]),
+    );
+    for (let i = 0; i < gallery.rooms.length; i += 1) {
+      for (let j = i + 1; j < gallery.rooms.length; j += 1) {
+        expect(overlaps(gallery.rooms[i], gallery.rooms[j], WALL)).toBe(false);
       }
     }
   });
 
-  it("hangs on both walls rather than crowding one", () => {
-    const gallery = buildGallery(years(["2019", 12]));
-    const left = gallery.rooms[0].frames.filter((f) => f.x < 0).length;
-    const right = gallery.rooms[0].frames.filter((f) => f.x > 0).length;
-    expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+  it("does not lay the rooms out in one straight line", () => {
+    const gallery = buildGallery(
+      years(["2014", 30], ["2015", 40], ["2016", 20], ["2017", 60], ["2018", 25], ["2019", 45]),
+    );
+    const axes = new Set(gallery.corridors.map((one) => one.axis));
+    expect(gallery.corridors).toHaveLength(gallery.rooms.length - 1);
+    expect(axes.size).toBeGreaterThan(1);
+    const spreadX = Math.max(...gallery.rooms.map((room) => room.x1)) -
+      Math.min(...gallery.rooms.map((room) => room.x0));
+    const spreadZ = Math.max(...gallery.rooms.map((room) => room.z1)) -
+      Math.min(...gallery.rooms.map((room) => room.z0));
+    expect(Math.min(spreadX, spreadZ)).toBeGreaterThan(MIN_SIDE);
+  });
+
+  it("lets you walk from the first room to every other one", () => {
+    const gallery = buildGallery(years(["2016", 24], ["2017", 60], ["2018", 12], ["2019", 40]));
+    for (const room of gallery.rooms) {
+      expect(reaches(gallery, gallery.start, centreOf(room))).toBe(true);
+    }
+  });
+
+  it("keeps every wall solid to walk into", () => {
+    const gallery = buildGallery(years(["2019", 30], ["2020", 20]));
+    expect(gallery.walls.length).toBeGreaterThan(gallery.rooms.length * 4);
+    for (const wall of gallery.walls) {
+      if (wall.y0 > 0) continue;
+      expect(blocked((wall.x0 + wall.x1) / 2, (wall.z0 + wall.z1) / 2, gallery.solids)).toBe(true);
+    }
+    const room = gallery.rooms[0];
+    const escape = slide(centreOf(room).x, centreOf(room).z, 500, 0, gallery.solids);
+    expect(escape.x).toBeLessThan(room.x1 + WALL * 2);
+  });
+
+  it("cuts a doorway wide enough to pass through", () => {
+    const gallery = buildGallery(years(["2019", 30], ["2020", 20]));
+    const corridor = gallery.corridors[0];
+    expect(Math.min(corridor.x1 - corridor.x0, corridor.z1 - corridor.z0)).toBeCloseTo(
+      DOOR_WIDTH,
+      6,
+    );
+    expect(blocked(centreOf(corridor).x, centreOf(corridor).z, gallery.solids)).toBe(false);
+    expect(reaches(gallery, gallery.start, centreOf(gallery.rooms[1]))).toBe(true);
+  });
+
+  it("puts a lintel over each doorway rather than leaving a slot to the ceiling", () => {
+    const gallery = buildGallery(years(["2019", 30], ["2020", 20]));
+    const lintels = gallery.walls.filter((wall) => wall.y0 === DOOR_HEIGHT);
+    expect(lintels.length).toBeGreaterThanOrEqual(2);
+    for (const lintel of lintels) expect(lintel.y1).toBe(ROOM_HEIGHT);
+  });
+
+  it("hangs pictures flat on a wall and never across a doorway", () => {
+    const gallery = buildGallery(years(["2018", 40], ["2019", 70], ["2020", 25]));
+
+    for (const room of gallery.rooms) {
+      expect(room.frames).toHaveLength(room.hung);
+      expect(room.hung).toBeGreaterThan(0);
+      expect(room.hung).toBeLessThanOrEqual(hangingSlots(room.runs));
+
+      for (const frame of room.frames) {
+        expect(holds(room, frame.x, frame.z, 0.1)).toBe(true);
+        expect(Math.abs(frame.nx) + Math.abs(frame.nz)).toBe(1);
+        const toWall =
+          frame.nx !== 0
+            ? Math.min(Math.abs(frame.x - room.x0), Math.abs(frame.x - room.x1))
+            : Math.min(Math.abs(frame.z - room.z0), Math.abs(frame.z - room.z1));
+        expect(toWall).toBeLessThan(0.2);
+      }
+    }
+  });
+
+  it("hangs on more than one wall of a room", () => {
+    const gallery = buildGallery(years(["2019", 60]));
+    const walls = new Set(gallery.rooms[0].frames.map((frame) => `${frame.nx}:${frame.nz}`));
+    expect(walls.size).toBeGreaterThan(1);
+  });
+
+  it("leaves the wall beside a door long enough to hang on", () => {
+    const room = { x0: 0, x1: 20, z0: 0, z1: 12 };
+    const runs = runsOf(room, [{ side: 0, from: 8, to: 8 + DOOR_WIDTH }]);
+    const north = runs.filter((run) => run.nz === -1);
+
+    expect(north).toHaveLength(2);
+    expect(north[0].length).toBeCloseTo(8, 6);
+    expect(north[1].length).toBeCloseTo(20 - 8 - DOOR_WIDTH, 6);
+    for (const run of runs) expect(run.length).toBeGreaterThan(ART_PITCH);
   });
 
   it("caps how many rooms are built at all", () => {
@@ -116,73 +261,82 @@ describe("gallery layout", () => {
     expect(buildGallery(years(...many)).rooms.length).toBe(MAX_ROOMS);
   });
 
-  it("leaves a doorway between neighbouring rooms and seals both ends", () => {
-    const gallery = buildGallery(years(["2003", 4], ["2019", 4]));
-    const [first, second] = gallery.rooms;
-
-    const between = gallery.solids.filter((s) => s.z0 >= first.z1 && s.z1 <= second.z0);
-    expect(between).toHaveLength(2);
-    expect(between.some((s) => s.x1 === -DOOR_WIDTH / 2)).toBe(true);
-    expect(between.some((s) => s.x0 === DOOR_WIDTH / 2)).toBe(true);
-
-    expect(blocked(0, (first.z1 + second.z0) / 2, gallery.solids)).toBe(false);
-
-    const back = slide(0, first.z0 + 1, 0, -20, gallery.solids);
-    expect(back.z).toBeGreaterThan(-1);
-    const out = slide(0, gallery.depth - 1, 0, 20, gallery.solids);
-    expect(out.z).toBeLessThan(gallery.depth + 1);
-    const through = slide(0, first.z0 + 2, 0, gallery.depth, gallery.solids);
-    expect(through.z).toBeGreaterThan(second.z0);
-  });
-
-  it("leaves the middle of the gallery clear to walk end to end", () => {
-    const gallery = buildGallery(years(["2003", 8], ["2019", 30], ["2021", 6]));
-    const start = gallery.rooms[0].z0 + 1;
-
-    for (let z = start; z < gallery.depth - 0.6; z += 0.25) {
-      expect(blocked(0, z, gallery.solids)).toBe(false);
-    }
-
-    const walked = slide(0, start, 0, gallery.depth, gallery.solids);
-    expect(walked.z).toBeGreaterThan(gallery.rooms[2].z0);
-  });
-
-  it("cannot be squeezed through a side wall", () => {
-    const gallery = buildGallery(years(["2019", 8]));
-    const escape = slide(0, gallery.rooms[0].z0 + 3, 500, 0, gallery.solids);
-    expect(Math.abs(escape.x)).toBeLessThan(ROOM_WIDTH / 2);
-  });
-
   it("puts furniture in the room and makes it solid", () => {
-    const gallery = buildGallery(years(["2019", 20]));
+    const gallery = buildGallery(years(["2019", 40]));
     const room = gallery.rooms[0];
-    const kinds = new Set(room.furniture.map((piece) => piece.kind));
-
-    expect(kinds).toContain("bench");
-    expect(kinds).toContain("plinth");
-    expect(kinds).toContain("planter");
+    expect(room.furniture.some((piece) => piece.kind === "plinth")).toBe(true);
+    expect(room.furniture.some((piece) => piece.kind === "bench")).toBe(true);
     for (const piece of room.furniture) {
       expect(blocked(piece.x, piece.z, gallery.solids)).toBe(true);
+      expect(holds(room, piece.x, piece.z)).toBe(true);
     }
   });
 
-  it("puts windows on both walls of every room", () => {
-    const gallery = buildGallery(years(["2003", 4], ["2019", 40]));
+  it("hangs lamps in every room, in the corridors, and over the pictures", () => {
+    const gallery = buildGallery(years(["2018", 40], ["2019", 70]));
+
     for (const room of gallery.rooms) {
-      expect(room.panes.some((pane) => pane.x < 0)).toBe(true);
-      expect(room.panes.some((pane) => pane.x > 0)).toBe(true);
+      expect(room.lamps.length).toBeGreaterThan(0);
+      for (const lamp of room.lamps) {
+        expect(holds(room, lamp.x, lamp.z, 1)).toBe(true);
+        expect(lamp.y).toBeGreaterThan(DOOR_HEIGHT - 1.5);
+        expect(lamp.y).toBeLessThan(ROOM_HEIGHT);
+        expect(lamp.strength).toBeGreaterThan(0);
+      }
+    }
+
+    const inCorridors = gallery.corridors.flatMap(corridorLamps);
+    expect(inCorridors.length).toBeGreaterThanOrEqual(gallery.corridors.length);
+    expect(gallery.lamps.length).toBeGreaterThan(inCorridors.length);
+  });
+
+  it("lights a big room with more lamps than a small one", () => {
+    const small = lampsFor({ x0: 0, x1: 9, z0: 0, z1: 9 }, []);
+    const large = lampsFor({ x0: 0, x1: 34, z0: 0, z1: 34 }, []);
+    expect(large.length).toBeGreaterThan(small.length);
+  });
+
+  it("hands the shader only the lamps closest to the eye", () => {
+    const gallery = buildGallery(years(["2018", 40], ["2019", 70], ["2020", 30]));
+    const near = nearestLamps(gallery.lamps, gallery.start.x, gallery.start.z, 8);
+
+    expect(near).toHaveLength(8);
+    const reach = (lamp: (typeof near)[number]) =>
+      Math.hypot(lamp.x - gallery.start.x, lamp.z - gallery.start.z);
+    expect(reach(near[0])).toBeLessThanOrEqual(reach(near[7]));
+    for (const lamp of gallery.lamps) {
+      if (near.includes(lamp)) continue;
+      expect(reach(lamp)).toBeGreaterThanOrEqual(reach(near[0]) - 1e-9);
+    }
+  });
+
+  it("puts windows high on the walls of every room", () => {
+    const gallery = buildGallery(years(["2003", 8], ["2019", 40]));
+    for (const room of gallery.rooms) {
+      expect(room.panes.length).toBeGreaterThan(0);
       for (const pane of room.panes) {
-        expect(pane.z).toBeGreaterThanOrEqual(room.z0);
-        expect(pane.z).toBeLessThanOrEqual(room.z1);
+        expect(holds(room, pane.x, pane.z, 0.1)).toBe(true);
+        expect(pane.width).toBeGreaterThan(0);
+        expect(pane.y).toBeGreaterThan(DOOR_HEIGHT);
       }
     }
   });
 
   it("says which room a spot belongs to", () => {
-    const gallery = buildGallery(years(["2003", 4], ["2019", 4]));
-    expect(roomAt(gallery, gallery.rooms[0].z0 + 1)?.label).toBe("2003");
-    expect(roomAt(gallery, gallery.rooms[1].z0 + 1)?.label).toBe("2019");
-    expect(roomAt(gallery, 10_000)).toBeNull();
+    const gallery = buildGallery(years(["2003", 8], ["2019", 8]));
+    expect(roomAt(gallery, centreOf(gallery.rooms[0]).x, centreOf(gallery.rooms[0]).z)?.label).toBe(
+      "2003",
+    );
+    expect(roomAt(gallery, centreOf(gallery.rooms[1]).x, centreOf(gallery.rooms[1]).z)?.label).toBe(
+      "2019",
+    );
+    expect(roomAt(gallery, 10_000, 10_000)).toBeNull();
+  });
+
+  it("starts you standing inside the first room", () => {
+    const gallery = buildGallery(years(["2003", 8], ["2019", 8]));
+    expect(holds(gallery.rooms[0], gallery.start.x, gallery.start.z)).toBe(true);
+    expect(blocked(gallery.start.x, gallery.start.z, gallery.solids)).toBe(false);
   });
 
   it("has nothing to show for an empty plan", () => {
@@ -202,7 +356,7 @@ describe("gallery layout", () => {
 });
 
 describe("gallery geometry", () => {
-  const gallery = buildGallery(years(["2003", 6], ["2019", 24]));
+  const gallery = buildGallery(years(["2003", 12], ["2019", 40], ["2020", 18]));
 
   it("builds a mesh with one normal and one shade per vertex", () => {
     const mesh = buildRoomMesh(gallery);
@@ -211,6 +365,58 @@ describe("gallery geometry", () => {
     expect(mesh.normal).toHaveLength(mesh.count * 3);
     expect(mesh.shade).toHaveLength(mesh.count);
     expect([...mesh.position].every(Number.isFinite)).toBe(true);
+  });
+
+  it("closes every wall, so none of them is a one-sided sheet", () => {
+    const mesh = buildRoomMesh(gallery);
+
+    for (const wall of gallery.walls) {
+      expect(facesAt(mesh, 0, wall.x0, -1)).toBeGreaterThanOrEqual(6);
+      expect(facesAt(mesh, 0, wall.x1, 1)).toBeGreaterThanOrEqual(6);
+      expect(facesAt(mesh, 2, wall.z0, -1)).toBeGreaterThanOrEqual(6);
+      expect(facesAt(mesh, 2, wall.z1, 1)).toBeGreaterThanOrEqual(6);
+      expect(facesAt(mesh, 1, wall.y1, 1)).toBeGreaterThanOrEqual(6);
+      expect(facesAt(mesh, 1, wall.y0, -1)).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it("winds every triangle to face the way its normal points", () => {
+    const mesh = buildRoomMesh(gallery);
+
+    for (let triangle = 0; triangle < mesh.count / 3; triangle += 1) {
+      const at = triangle * 9;
+      const a = [mesh.position[at], mesh.position[at + 1], mesh.position[at + 2]];
+      const b = [mesh.position[at + 3], mesh.position[at + 4], mesh.position[at + 5]];
+      const c = [mesh.position[at + 6], mesh.position[at + 7], mesh.position[at + 8]];
+      const normal = [mesh.normal[at], mesh.normal[at + 1], mesh.normal[at + 2]];
+
+      const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      const cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+      ];
+      const facing = cross[0] * normal[0] + cross[1] * normal[1] + cross[2] * normal[2];
+      expect(facing).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("gives a doorway a soffit you can see from underneath", () => {
+    const mesh = buildRoomMesh(gallery);
+    const lintel = gallery.walls.find((wall) => wall.y0 === DOOR_HEIGHT)!;
+    expect(facesAt(mesh, 1, lintel.y0, -1)).toBeGreaterThanOrEqual(6);
+  });
+
+  it("floors and roofs every room and every corridor", () => {
+    const mesh = buildRoomMesh(gallery);
+    for (const room of gallery.rooms) {
+      expect(facesAt(mesh, 1, ROOM_HEIGHT, -1)).toBeGreaterThanOrEqual(6);
+      expect(holds(room, room.x0 + 0.1, room.z0 + 0.1)).toBe(true);
+    }
+    expect(facesAt(mesh, 1, 0, 1)).toBeGreaterThanOrEqual(
+      (gallery.rooms.length + gallery.corridors.length) * 6,
+    );
   });
 
   it("builds two triangles for every window and every light shaft", () => {
@@ -222,7 +428,7 @@ describe("gallery geometry", () => {
   it("keeps every wall inside the building", () => {
     const mesh = buildRoomMesh(gallery);
     for (let i = 0; i < mesh.count; i += 1) {
-      expect(Math.abs(mesh.position[i * 3])).toBeLessThanOrEqual(ROOM_WIDTH);
+      expect(holds(gallery.bounds, mesh.position[i * 3], mesh.position[i * 3 + 2], 0.5)).toBe(true);
       expect(mesh.position[i * 3 + 1]).toBeGreaterThanOrEqual(0);
     }
   });
@@ -285,12 +491,7 @@ describe("walking", () => {
   });
 
   it("cannot be shoved through a wall by a huge time step", () => {
-    const result = step(
-      { ...walker, x: 0 },
-      { forward: 0, strafe: 1, running: true },
-      wall,
-      10,
-    );
+    const result = step({ ...walker, x: 0 }, { forward: 0, strafe: 1, running: true }, wall, 10);
     expect(result.x).toBeLessThan(2);
   });
 });

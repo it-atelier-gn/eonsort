@@ -99,7 +99,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tauriScript: npx tauri
-          args: --target ${{ matrix.target }} --features upright,tagging
+          args: --target ${{ matrix.target }} --features upright,tagging,quality
 
       - name: Build the command line tool
         run: cargo build --release -p eonsort-cli --target ${{ matrix.target }}

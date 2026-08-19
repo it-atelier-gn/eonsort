@@ -14,6 +14,8 @@ pub struct Sighting {
     pub tags: Vec<String>,
     #[serde(default)]
     pub vector: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<f32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -155,7 +157,42 @@ mod tests {
         Sighting {
             tags: tags.iter().map(|t| t.to_string()).collect(),
             vector,
+            quality: None,
         }
+    }
+
+    #[test]
+    fn a_sidecar_written_before_the_scores_existed_still_reads() {
+        let held: Tags =
+            serde_json::from_str(r#"{"/photos/a.jpg":{"tags":["a dog"],"vector":[0.5,0.5]}}"#)
+                .unwrap();
+        let sighting = held.get(Path::new("/photos/a.jpg")).unwrap();
+        assert_eq!(sighting.tags, vec!["a dog".to_string()]);
+        assert_eq!(sighting.quality, None);
+    }
+
+    #[test]
+    fn a_score_survives_the_round_trip_and_stays_out_of_the_way_when_absent() {
+        let mut tags = Tags::default();
+        tags.set(
+            PathBuf::from("/photos/b.jpg"),
+            Sighting {
+                tags: vec!["a good picture".to_string()],
+                vector: vec![],
+                quality: Some(6.25),
+            },
+        );
+        let raw = serde_json::to_string(&tags).unwrap();
+        assert!(raw.contains("6.25"), "{raw}");
+
+        let read: Tags = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            read.get(Path::new("/photos/b.jpg")).unwrap().quality,
+            Some(6.25)
+        );
+
+        let bare = serde_json::to_string(&sighting(&["a dog"], vec![])).unwrap();
+        assert!(!bare.contains("quality"), "{bare}");
     }
 
     #[test]

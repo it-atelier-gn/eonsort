@@ -1,5 +1,5 @@
 use eonsort_core::model::DEFAULT_FOLDER_PATTERN;
-use eonsort_core::providers::{Provider, Strategy};
+use eonsort_core::providers::{clean_weights, Provider, Strategy, Weights};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
@@ -18,12 +18,16 @@ pub struct Settings {
     pub folder_pattern: String,
     pub providers: Vec<Provider>,
     pub strategy: Strategy,
+    #[serde(default)]
+    pub weights: Weights,
     pub follow_symlinks: bool,
     pub auto_rotate: bool,
     #[serde(default = "yes")]
     pub pair_companions: bool,
     #[serde(default)]
     pub tag_pictures: bool,
+    #[serde(default)]
+    pub rate_quality: bool,
     pub preserve_times: bool,
     #[serde(default)]
     pub stamp_date: bool,
@@ -39,10 +43,12 @@ impl Default for Settings {
             folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
             providers: Provider::DEFAULT.to_vec(),
             strategy: Strategy::default(),
+            weights: Weights::new(),
             follow_symlinks: false,
             auto_rotate: false,
             pair_companions: true,
             tag_pictures: false,
+            rate_quality: false,
             preserve_times: true,
             stamp_date: false,
             compare_hashes: false,
@@ -59,6 +65,10 @@ pub fn load(app: &AppHandle) -> Settings {
 }
 
 pub fn save(app: &AppHandle, settings: &Settings) -> Result<(), String> {
+    let settings = &Settings {
+        weights: clean_weights(&settings.weights),
+        ..settings.clone()
+    };
     let path = path(app).ok_or("no configuration directory available")?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -75,4 +85,32 @@ pub fn plan_directory(app: &AppHandle) -> Option<PathBuf> {
 
 fn path(app: &AppHandle) -> Option<PathBuf> {
     Some(app.path().app_config_dir().ok()?.join(FILE_NAME))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_written_before_the_weights_existed_still_read() {
+        let held: Settings = serde_json::from_str(r#"{"providers":["exif"]}"#).unwrap();
+        assert_eq!(held.providers, vec![Provider::Exif]);
+        assert!(held.weights.is_empty());
+    }
+
+    #[test]
+    fn a_weight_of_your_own_survives_the_round_trip() {
+        let mut settings = Settings::default();
+        settings.weights.insert(Provider::Filename, 90);
+        let raw = serde_json::to_string(&settings).unwrap();
+        let read: Settings = serde_json::from_str(&raw).unwrap();
+        assert_eq!(read.weights[&Provider::Filename], 90);
+    }
+
+    #[test]
+    fn a_weight_off_the_scale_is_pulled_back_in_before_it_is_written() {
+        let mut settings = Settings::default();
+        settings.weights.insert(Provider::Filename, 4000);
+        assert_eq!(clean_weights(&settings.weights)[&Provider::Filename], 100);
+    }
 }

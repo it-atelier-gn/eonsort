@@ -13,9 +13,11 @@ before a byte is copied. Then press **Copy files**. Sources are only ever read.
 
 The tree is a table: **Folder**, **Files** and **Size**, each column sized to what is in it, drag
 the edge of a heading to set a width of your own or double-click that edge to fit the contents
-again, and drag the heading itself to reorder. Widths and order are both remembered. Clicking a
-folder shows everything underneath it, so a year lists its whole year rather than nothing at all,
-and a time range picked in **Charts** prunes the tree to match.
+again, and drag the heading itself to reorder. Widths and order are both remembered. The file list
+beside it works the same way, with **Name**, **Date**, **From**, **Size** and **Status**, and keeps
+its own widths and order. Clicking a folder shows everything underneath it, so a year lists its
+whole year rather than nothing at all, and a time range picked in **Charts** prunes the tree to
+match.
 
 In the file list, <kbd>↑</kbd> and <kbd>↓</kbd> walk from file to file with the preview pane
 following the selection, <kbd>Home</kbd> and <kbd>End</kbd> jump to either end, and <kbd>Enter</kbd>
@@ -78,6 +80,12 @@ Every source that reports a date is kept. Each can be switched off. Three rules 
 | **Oldest date wins** | Keeps the earliest date any source reports |
 | **First match wins** | Walks the sources in order, stops at the first hit |
 
+**Order and weight…** beside *Where dates come from* opens a window of its own listing every source.
+Drag a source, or use the arrows, to set the order **First match wins** walks. Give each source a
+weight between 0 and 100 to say how much it counts when the evidence is weighed — EXIF starts at 40,
+the file system at 10 — and **Reset the weights** puts them all back. The tick decides whether a
+source is asked at all. Changes are saved as you make them and reach the main window at once.
+
 ## Finding a picture by what is in it
 
 Tick **Look at pictures and tag them after a scan**. Once the scan finishes, eonsort works through
@@ -86,7 +94,8 @@ plain tags: *a forest*, *a dog*, *a birthday party*. Tags show in the preview pa
 
 It also keeps the embedding it computed, so the search box takes ordinary words rather than tag
 names. Type `forest and dog` and press Enter; every view narrows to the pictures that match, ranked
-by how well. **Clear** puts everything back.
+by how well. **Clear** puts everything back. The box beside it lists every tag in the plan: pick one
+and the whole app narrows to the pictures carrying it.
 
 The work is [SigLIP](https://huggingface.co/google/siglip-base-patch16-224) running locally on the
 CPU — nothing leaves your machine, and no runner needs hosting. Released builds ship with it; all it
@@ -97,12 +106,32 @@ the `tagging` feature turned on:
 cargo tauri build --features upright,tagging
 ```
 
-Weights land in `models/` inside the app data folder; delete that folder to reclaim the space.
+Weights land in `models/<owner>--<model>/` inside the app data folder, one folder per model so two
+models can bring a file of the same name; delete `models/` to reclaim the space.
 Pictures already tagged are skipped when the pass runs again, so a second scan only looks at what is
 new. Without the feature, the search box still works — it falls back to matching your words against
 tags already stored.
 
-Tags live in a `*.tags.json` file beside the plan.
+## Finding the good ones
+
+Tick **Also judge how good each picture looks** and a second model scores every picture the way
+people rated photographs, from about 1 to 10. Anything from 5.5 up is tagged *a good picture*, and
+from 6.2 up *a beautiful picture*, so the tag box beside the search finds the best of a shoot
+without you opening any of it. The score is kept beside the tags.
+
+That model is the
+[LAION aesthetic predictor](https://huggingface.co/shunk031/aesthetics-predictor-v1-vit-base-patch32)
+— a CLIP ViT-B/32 tower with a linear head — again running on the CPU, a one-off download of about
+335 MB offered next to the tagging model. A build of your own needs the `quality` feature:
+
+```sh
+cargo tauri build --features upright,tagging,quality
+```
+
+It runs inside the tagging pass, so it needs the tagging model too and costs a little more time per
+picture.
+
+Tags and scores live in a `*.tags.json` file beside the plan.
 
 ## Files that belong together
 
@@ -144,7 +173,7 @@ re-dated.
 
 ## Seeing it rather than reading it
 
-Three visual tabs. In the two walkable ones: click to take the mouse,
+Four visual tabs. In the two walkable ones: click to take the mouse,
 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, <kbd>Shift</kbd> to run, mouse to look,
 <kbd>Esc</kbd> to give the mouse back.
 
@@ -167,10 +196,39 @@ the preview pane. **Auto-fly** cruises from oldest to newest; any drag takes the
 
 ### Gallery
 
-Builds a building out of your archive. One room per period, oldest first, a longer hall for a busy
-year. Pictures hang at eye height, videos play in frame, daylight falls through a clerestory band.
-Rooms open into one another as one enfilade. Look at a picture for its name and date; click or press
-<kbd>E</kbd> to open it in the preview pane.
+Builds a building out of your archive, laid out afresh for every collection. One room per period,
+oldest first, its size set by how many files that period holds and its shape drawn at random; the
+plan turns left and right as it goes, so no two archives walk the same way. The layout is seeded
+from the files themselves, so the same plan always gives you the same building. Short corridors
+join the rooms, each with a doorway you can see the lintel of and the next room through.
+
+Every wall is a solid block with a face on both sides, so nothing disappears when you look at it
+from the other room. Light comes from outside and from inside at once: daylight falls through the
+clerestory band high on the walls, and lamps hang from the ceilings, over the pictures and along
+the corridors, lighting the walls, the floor and the frames near them.
+
+Pictures hang at eye height on every wall the doorways leave free, videos play in frame, and there
+are benches, plinths and planters to walk around. Look at a picture for its name and date; click or
+press <kbd>E</kbd> to open it in the preview pane.
+
+### Rings
+
+One ring per year, stacked with the newest on top, and the pictures of that year standing side by
+side around it, facing outwards. A ring widens with the number of files that landed in the year, so
+a busy year is a wide hoop and a thin one a small circle; a year with more pictures than fit side by
+side is thinned to an even sample across the year and its label says so. Every month has a colour of
+its own, so the same season sits at the same angle on every ring and the seasons read as bands. The
+pictures nearest the eye load their thumbnails; the rest stay as coloured tiles.
+
+Drag to turn the stack and the wheel to zoom; steps get finer the nearer you come, so the pictures
+cannot be overshot from behind. A slider on the right lifts your eye up and down the stack, with the
+years listed beside it — click one and the view glides to that ring and settles level with it, so
+the ring sits centred. A second slider tilts you from below the stack to above it. **Turn** lets the
+stack rotate on its own, at whatever pace the speed slider asks for; a wide year turns more slowly
+than a narrow one, so the pictures drift past at much the same speed either way. Click a picture to
+open it in the preview pane. **Spiral** unwinds the rings into one continuous coil — each year
+climbs through its own turn and meets the next where it left off — and **Rings** stacks them flat
+again. Everything here works the same in either.
 
 ### Charts
 
@@ -187,9 +245,10 @@ The same questions in flat 2D, often quicker to read:
 The first figure is also the way in. Click a square to drop into it, drag for a range, or click a
 row label for a whole year; the grid refines from years to months to days to hours.
 
-Whatever you pick scopes the whole app: every figure recounts itself, and the folder tree, Timeline
-and Gallery show only those files. A bar under the toolbar tracks where you are — `All time › 2019 ›
-Mar 2019` — each step clickable, plus **Back** and **Show all**. Scanning again clears it.
+Whatever you pick scopes the whole app: every figure recounts itself, and the folder tree, Timeline,
+Gallery and Rings show only those files. A bar under the toolbar tracks where you are —
+`All time › 2019 › Mar 2019` — each step clickable, plus **Back** and **Show all**. Scanning again
+clears it.
 
 ## Turning pictures upright
 
@@ -203,7 +262,10 @@ right everywhere. Originals are never touched.
 For JPEGs the turn is genuinely lossless — compressed data is rearranged, not decoded and
 recompressed — and the EXIF block survives intact.
 
-The preview shows every picture as it will be copied, and any of them can be corrected:
+The preview shows every picture as it will be copied. Hold <kbd>Ctrl</kbd> and turn the wheel to
+zoom into it — the spot under the pointer stays where it is — then drag to pan; the small `−`, `+`
+and `⟲` buttons in the corner do the same without a wheel. The zoom resets as soon as another file
+is selected. Any picture can also be corrected:
 
 | Key | |
 |---|---|
@@ -312,6 +374,7 @@ it goes, and the plan records relative paths. Naming it on `copy` re-points the 
 | `--destination "E:\Sorted"` | Where the sorted tree goes. Optional on `scan`; on `copy` it sets or changes where an existing plan lands. |
 | `--provider filename exif` | Only these date sources, in this order. |
 | `--strategy oldest` | Earliest date reported. `priority` stops at the first source that reports one. |
+| `--weight exif=45` | How much a source counts under the default strategy, 0 to 100. Repeat for more sources. |
 | `--suspect` | On `show`, list only entries whose date looks wrong. |
 | `--auto-rotate` | On `scan`, note sideways pictures so the copy turns them upright. |
 | `--stamp-date` | On `copy`, write the chosen date into the EXIF block of each copy. |

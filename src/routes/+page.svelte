@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
   import {
     baseName,
     cancelJob,
@@ -54,19 +54,21 @@
     type VerifyReport,
   } from "$lib/api";
   import { buildTree, foldersOf, under, type TreeNode } from "$lib/tree";
-  import TreeHeader from "$lib/components/TreeHeader.svelte";
+  import ColumnHead from "$lib/components/ColumnHead.svelte";
   import {
     cleanOrder,
     cleanWidths,
     template,
     widthOf,
     withWidth,
-    ORDER_KEY,
-    WIDTH_KEY,
-    type ColumnId,
+    FILE_COLUMNS,
+    TREE_COLUMNS,
+    type ColumnSet,
     type ColumnWidths,
+    type FileColumnId,
+    type TreeColumnId,
   } from "$lib/columns";
-  import { appVersion, versionLabel } from "$lib/version";
+  import { appVersion, releaseUrl, versionLabel } from "$lib/version";
   import SetupPanel from "$lib/components/SetupPanel.svelte";
   import TreeItem from "$lib/components/TreeItem.svelte";
   import FileList from "$lib/components/FileList.svelte";
@@ -75,6 +77,7 @@
   import TimeScape from "$lib/components/TimeScape.svelte";
   import ChartsPanel from "$lib/components/ChartsPanel.svelte";
   import GalleryView from "$lib/components/GalleryView.svelte";
+  import RingsView from "$lib/components/RingsView.svelte";
   import ScopeBar from "$lib/components/ScopeBar.svelte";
   import { filterRange, sameRange, type TimeRange } from "$lib/viz/range";
 
@@ -91,13 +94,19 @@
   let previewLoading = $state(false);
   let suspects = $state<SuspectGroup[]>([]);
   let fixing = $state(false);
-  let view = $state<"folders" | "timeline" | "charts" | "gallery">("folders");
+  let view = $state<"folders" | "timeline" | "charts" | "gallery" | "rings">("folders");
   let timelineEntries = $state<EntryView[]>([]);
   let loadingAll = $state(false);
   let tagProgress = $state<TagProgress | null>(null);
+  const tagShare = $derived(
+    tagProgress && tagProgress.total > 0
+      ? Math.round((tagProgress.done / tagProgress.total) * 100)
+      : 0,
+  );
   let tagging = $state(false);
   let tagNote = $state<string | null>(null);
   let tagsBySource = $state<Record<string, string[]>>({});
+  let pickedTag = $state("");
   let query = $state("");
   let hits = $state<TagHit[] | null>(null);
   let searching = $state(false);
@@ -133,38 +142,50 @@
   let error = $state<string | null>(null);
   let patternError = $state<string | null>(null);
 
-  let columnOrder = $state<ColumnId[]>(rememberedOrder());
-  let columnWidths = $state<ColumnWidths>(rememberedWidths());
+  let columnOrder = $state<TreeColumnId[]>(rememberedOrder(TREE_COLUMNS));
+  let columnWidths = $state<ColumnWidths<TreeColumnId>>(rememberedWidths(TREE_COLUMNS));
+  let fileOrder = $state<FileColumnId[]>(rememberedOrder(FILE_COLUMNS));
+  let fileWidths = $state<ColumnWidths<FileColumnId>>(rememberedWidths(FILE_COLUMNS));
   let version = $state<string | null>(null);
 
-  function rememberedOrder(): ColumnId[] {
-    if (typeof localStorage === "undefined") return cleanOrder(null);
+  function rememberedOrder<Id extends string>(set: ColumnSet<Id>): Id[] {
+    if (typeof localStorage === "undefined") return cleanOrder(set, null);
     try {
-      const held = localStorage.getItem(ORDER_KEY);
-      return cleanOrder(held === null ? null : JSON.parse(held));
+      const held = localStorage.getItem(set.orderKey);
+      return cleanOrder(set, held === null ? null : JSON.parse(held));
     } catch {
-      return cleanOrder(null);
+      return cleanOrder(set, null);
     }
   }
 
-  function reorderColumns(next: ColumnId[]) {
+  function reorderColumns(next: TreeColumnId[]) {
     columnOrder = next;
-    remember(ORDER_KEY, next);
+    remember(TREE_COLUMNS.orderKey, next);
   }
 
-  function rememberedWidths(): ColumnWidths {
+  function reorderFileColumns(next: FileColumnId[]) {
+    fileOrder = next;
+    remember(FILE_COLUMNS.orderKey, next);
+  }
+
+  function rememberedWidths<Id extends string>(set: ColumnSet<Id>): ColumnWidths<Id> {
     if (typeof localStorage === "undefined") return {};
     try {
-      const held = localStorage.getItem(WIDTH_KEY);
-      return cleanWidths(held === null ? null : JSON.parse(held));
+      const held = localStorage.getItem(set.widthKey);
+      return cleanWidths(set, held === null ? null : JSON.parse(held));
     } catch {
       return {};
     }
   }
 
-  function resizeColumn(id: ColumnId, width: number | null) {
-    columnWidths = withWidth(columnWidths, id, width);
-    remember(WIDTH_KEY, columnWidths);
+  function resizeColumn(id: TreeColumnId, width: number | null) {
+    columnWidths = withWidth(TREE_COLUMNS, columnWidths, id, width);
+    remember(TREE_COLUMNS.widthKey, columnWidths);
+  }
+
+  function resizeFileColumn(id: FileColumnId, width: number | null) {
+    fileWidths = withWidth(FILE_COLUMNS, fileWidths, id, width);
+    remember(FILE_COLUMNS.widthKey, fileWidths);
   }
 
   function remember(key: string, value: unknown) {
@@ -203,12 +224,20 @@
       return seen && seen.length > 0 ? { ...entry, tags: seen } : entry;
     }),
   );
-  const foundEntries = $derived(
+  const knownTags = $derived(
+    [...new Set(Object.values(tagsBySource).flat())].sort((a, b) => a.localeCompare(b)),
+  );
+  const searchedEntries = $derived(
     hits === null
       ? taggedEntries
       : hits
           .map((hit) => taggedEntries.find((entry) => entry.source === hit.source))
           .filter((entry): entry is EntryView => entry !== undefined),
+  );
+  const foundEntries = $derived(
+    pickedTag === ""
+      ? searchedEntries
+      : searchedEntries.filter((entry) => entry.tags.includes(pickedTag)),
   );
   const scopedEntries = $derived(filterRange(foundEntries, scope));
   const entries = $derived(under(scopedEntries, selectedFolder));
@@ -217,17 +246,19 @@
   const tree = $derived<TreeNode[]>(buildTree(foldersOf(scopedEntries)));
   const flatTree = $derived(flatten(tree));
   const columnGrid = $derived(
-    template(columnOrder, {
+    template(TREE_COLUMNS, columnOrder, {
       name: columnWidths.name ?? 0,
       files:
         columnWidths.files ??
         widthOf(
+          TREE_COLUMNS,
           "files",
           flatTree.map((node) => String(node.files)),
         ),
       size:
         columnWidths.size ??
         widthOf(
+          TREE_COLUMNS,
           "size",
           flatTree.map((node) => formatBytes(node.bytes)),
         ),
@@ -254,6 +285,7 @@
     version = await appVersion();
 
     unlisteners = await Promise.all([
+      listen<Settings>("settings:changed", (e) => (settings = e.payload)),
       listen<ScanProgress>("scan:progress", (e) => (scanProgress = e.payload)),
       listen<PlanSummary>("scan:done", async (e) => {
         job = null;
@@ -313,6 +345,19 @@
     scanProgress = null;
     verifyProgress = null;
     error = message === "cancelled" ? "Stopped. Run it again to continue where it left off." : message;
+  }
+
+  function fileName(path: string): string {
+    const at = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    return at >= 0 ? path.slice(at + 1) : path;
+  }
+
+  async function openReleases() {
+    try {
+      await openUrl(releaseUrl(version));
+    } catch (e) {
+      fail(String(e));
+    }
   }
 
   async function updateSettings(next: Settings) {
@@ -417,7 +462,7 @@
     preview = null;
   }
 
-  function showAll(next: "timeline" | "charts" | "gallery") {
+  function showAll(next: "timeline" | "charts" | "gallery" | "rings") {
     view = next;
   }
 
@@ -519,7 +564,7 @@
 
   function onKeydown(event: KeyboardEvent) {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (view === "gallery" || busy || fixing) return;
+    if (view === "gallery" || view === "rings" || busy || fixing) return;
     const target = event.target as HTMLElement | null;
     if (
       target &&
@@ -626,6 +671,7 @@
         folder_pattern: settings!.folder_pattern,
         providers: settings!.providers,
         strategy: settings!.strategy,
+        weights: settings!.weights ?? {},
         follow_symlinks: settings!.follow_symlinks,
         auto_rotate: settings!.auto_rotate,
         pair_companions: settings!.pair_companions,
@@ -682,8 +728,21 @@
         </button>
         <button class:active={view === "charts"} onclick={() => showAll("charts")}>Charts</button>
         <button class:active={view === "gallery"} onclick={() => showAll("gallery")}>Gallery</button>
+        <button class:active={view === "rings"} onclick={() => showAll("rings")}>Rings</button>
       </div>
       <div class="look">
+        {#if knownTags.length > 0}
+          <select
+            bind:value={pickedTag}
+            title="Show only the pictures carrying one tag"
+            aria-label="Filter by tag"
+          >
+            <option value="">Any tag</option>
+            {#each knownTags as tag (tag)}
+              <option value={tag}>{tag}</option>
+            {/each}
+          </select>
+        {/if}
         <input
           type="search"
           placeholder="forest and dog"
@@ -709,17 +768,32 @@
     </div>
   </header>
 
-  {#if tagProgress || tagNote || hits !== null}
+  {#if tagProgress || tagNote || hits !== null || pickedTag !== ""}
     <div class="tagbar faint tiny">
       {#if tagProgress}
         <span class="spinner"></span>
         <span>
           Looking at pictures — {tagProgress.done.toLocaleString()} of {tagProgress.total.toLocaleString()}
+          ({tagShare}%)
         </span>
+        <div class="bar thin">
+          <div class="fill" style="width: {tagShare}%"></div>
+        </div>
+        {#if tagProgress.current}
+          <span class="truncate current" title={tagProgress.current}>
+            {fileName(tagProgress.current)}
+          </span>
+        {/if}
         <button class="ghost" onclick={() => void cancelTagging()}>Stop</button>
       {:else if hits !== null}
         <span>{hits.length.toLocaleString()} pictures match &ldquo;{query.trim()}&rdquo;</span>
         <button class="ghost" onclick={clearSearch}>Show all again</button>
+      {/if}
+      {#if pickedTag !== ""}
+        <span>
+          {foundEntries.length.toLocaleString()} tagged &ldquo;{pickedTag}&rdquo;
+        </span>
+        <button class="ghost" onclick={() => (pickedTag = "")}>Every tag again</button>
       {/if}
       {#if tagNote}
         <span>{tagNote}</span>
@@ -749,11 +823,14 @@
         <ChartsPanel entries={scopedEntries} range={scope} onDrill={drill} />
       {:else if view === "gallery"}
         <GalleryView entries={scopedEntries} onSelect={selectEntry} />
+      {:else if view === "rings"}
+        <RingsView entries={scopedEntries} onSelect={selectEntry} />
       {:else if view === "timeline"}
         <TimeScape entries={scopedEntries} selected={selectedEntry} onSelect={selectEntry} />
       {:else}
         <div class="tree scroll" role="tree" aria-label="Planned folders">
-          <TreeHeader
+          <ColumnHead
+            set={TREE_COLUMNS}
             order={columnOrder}
             grid={columnGrid}
             onReorder={reorderColumns}
@@ -780,9 +857,13 @@
           folder={selectedFolder}
           selected={selectedEntry}
           {marked}
+          order={fileOrder}
+          widths={fileWidths}
           onSelect={selectEntry}
           onMark={(sources) => (marked = sources)}
           onOpen={(entry) => openInSystem(entry.source)}
+          onReorder={reorderFileColumns}
+          onResize={resizeFileColumn}
         />
       {/if}
 
@@ -896,6 +977,8 @@
         {formatBytes(copyProgress.bytes_done)} of {formatBytes(copyProgress.bytes_total)}
       {:else if verifyProgress}
         Checking {verifyProgress.checked} of {verifyProgress.total}
+      {:else if tagProgress}
+        Looking at pictures — {tagProgress.done.toLocaleString()} of {tagProgress.total.toLocaleString()}
       {:else if error}
         <span class="error">{error}</span>
       {:else if notice}
@@ -919,6 +1002,10 @@
           style="width: {Math.round((scanProgress.files_seen / scanProgress.files_total) * 100)}%"
         ></div>
       </div>
+    {:else if tagProgress}
+      <div class="bar" title="Pictures looked at so far">
+        <div class="fill" style="width: {tagShare}%"></div>
+      </div>
     {/if}
 
     {#if suspectCount > 0}
@@ -937,7 +1024,13 @@
 
     {#if versionLabel(version)}
       <span class="split" aria-hidden="true"></span>
-      <span class="version">{versionLabel(version)}</span>
+      <button
+        class="version"
+        title="Open the release this build came from"
+        onclick={() => void openReleases()}
+      >
+        {versionLabel(version)}
+      </button>
     {/if}
   </footer>
 </div>
@@ -1154,6 +1247,26 @@
     color: var(--text-faint);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .version:hover,
+  .version:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  .bar.thin {
+    width: 120px;
+    height: 4px;
+  }
+
+  .current {
+    max-width: 220px;
   }
 
   .bar {

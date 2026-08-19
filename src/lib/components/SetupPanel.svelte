@@ -3,13 +3,18 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { open } from "@tauri-apps/plugin-dialog";
   import {
+    cancelQualityInstall,
     cancelTagInstall,
     formatBytes,
+    installQualityModel,
     installTagModel,
+    openSourcesWindow,
+    qualityModelStatus,
     tagModelStatus,
     type TagModelStatus,
   } from "$lib/api";
-  import type { Provider, Settings, Strategy } from "$lib/api";
+  import type { Settings, Strategy } from "$lib/api";
+  import { sourceOf } from "$lib/sources";
 
   interface Props {
     settings: Settings;
@@ -20,28 +25,19 @@
 
   let { settings, busy, patternError, onChange }: Props = $props();
 
-  const PROVIDERS: { id: Provider; label: string; hint: string }[] = [
-    { id: "filename", label: "File name", hint: "Dates written into the name" },
-    { id: "exif", label: "EXIF", hint: "Camera metadata in photos" },
-    { id: "media", label: "Media", hint: "Recording time in videos" },
-    { id: "xmp", label: "XMP sidecar", hint: "The .xmp a raw developer writes beside a picture" },
-    { id: "takeout", label: "Google Takeout", hint: "The JSON sidecar an export leaves behind" },
-    {
-      id: "system",
-      label: "System properties",
-      hint: "Windows Details and macOS Spotlight, for files nothing else could date",
-    },
-    { id: "filesystem", label: "File system", hint: "Created / modified time" },
-  ];
-
   let tagModel = $state<TagModelStatus | null>(null);
   let fetchingTags = $state(false);
   let fetched = $state<{ completed: number; total: number } | null>(null);
   let tagError = $state<string | null>(null);
+  let qualityModel = $state<TagModelStatus | null>(null);
+  let fetchingQuality = $state(false);
+  let rated = $state<{ completed: number; total: number } | null>(null);
+  let qualityError = $state<string | null>(null);
   let stops: UnlistenFn[] = [];
 
   onMount(async () => {
     await refreshTagModel();
+    await refreshQualityModel();
     stops = await Promise.all([
       listen<{ completed: number; total: number }>("tags:fetch", (e) => (fetched = e.payload)),
       listen<number>("tags:fetched", async () => {
@@ -56,6 +52,19 @@
         tagError = e.payload === "cancelled" ? "Download stopped." : e.payload;
         await refreshTagModel();
       }),
+      listen<{ completed: number; total: number }>("quality:fetch", (e) => (rated = e.payload)),
+      listen<number>("quality:fetched", async () => {
+        fetchingQuality = false;
+        rated = null;
+        await refreshQualityModel();
+      }),
+      listen<string>("quality:error", async (e) => {
+        if (!fetchingQuality) return;
+        fetchingQuality = false;
+        rated = null;
+        qualityError = e.payload === "cancelled" ? "Download stopped." : e.payload;
+        await refreshQualityModel();
+      }),
     ]);
   });
 
@@ -66,6 +75,25 @@
       tagModel = await tagModelStatus();
     } catch {
       tagModel = null;
+    }
+  }
+
+  async function refreshQualityModel() {
+    try {
+      qualityModel = await qualityModelStatus();
+    } catch {
+      qualityModel = null;
+    }
+  }
+
+  async function getQualityModel() {
+    qualityError = null;
+    fetchingQuality = true;
+    try {
+      await installQualityModel();
+    } catch (e) {
+      fetchingQuality = false;
+      qualityError = String(e);
     }
   }
 
@@ -113,12 +141,14 @@
     onChange({ ...settings, sources: settings.sources.filter((s) => s !== path) });
   }
 
-  function toggleProvider(id: Provider) {
-    const enabled = settings.providers.includes(id);
-    const next = enabled
-      ? settings.providers.filter((p) => p !== id)
-      : [...settings.providers, id];
-    onChange({ ...settings, providers: next });
+  const inUse = $derived(settings.providers.map((id) => sourceOf(id).label).join(", "));
+
+  async function editSources() {
+    try {
+      await openSourcesWindow();
+    } catch {
+      // a window that will not open is reported by the window itself
+    }
   }
 </script>
 
@@ -181,20 +211,13 @@
   </section>
 
   <section>
-    <label for="providers">Where dates come from</label>
-    <div id="providers" class="checks">
-      {#each PROVIDERS as provider (provider.id)}
-        <label class="check" title={provider.hint}>
-          <input
-            type="checkbox"
-            checked={settings.providers.includes(provider.id)}
-            disabled={busy}
-            onchange={() => toggleProvider(provider.id)}
-          />
-          <span>{provider.label}</span>
-        </label>
-      {/each}
+    <div class="head">
+      <label for="providers">Where dates come from</label>
+      <button class="ghost" onclick={editSources} disabled={busy}>Order and weight…</button>
     </div>
+    <p id="providers" class="faint hint">
+      {inUse === "" ? "No source is being asked for a date." : inUse}
+    </p>
   </section>
 
 
@@ -314,6 +337,50 @@
       {#if tagError}
         <p class="hint error">{tagError}</p>
       {/if}
+
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={settings.rate_quality}
+          disabled={busy}
+          onchange={(e) => onChange({ ...settings, rate_quality: e.currentTarget.checked })}
+        />
+        <span>Also judge how good each picture looks</span>
+      </label>
+      <p class="faint hint">
+        A second model scores each picture the way people rated photographs, and the best of them
+        pick up <em>a good picture</em> and <em>a beautiful picture</em> as tags you can pick from
+        the tag list.
+      </p>
+
+      {#if settings.rate_quality}
+        <div class="model-line">
+          {#if qualityModel && !qualityModel.built_in}
+            <span class="faint tiny">This build was made without the quality model.</span>
+          {:else if qualityModel?.present}
+            <span class="faint tiny">
+              Quality model ready · {formatBytes(qualityModel.total)}
+            </span>
+          {:else if fetchingQuality}
+            <button class="ghost" onclick={() => void cancelQualityInstall()}>
+              {rated
+                ? `Stop (${formatBytes(rated.completed)} of ${formatBytes(rated.total)})`
+                : "Stop"}
+            </button>
+          {:else if qualityModel}
+            <button
+              disabled={busy}
+              onclick={getQualityModel}
+              title="Downloads about 335 MB of model weights, once"
+            >
+              Get the quality model
+            </button>
+          {/if}
+        </div>
+        {#if qualityError}
+          <p class="hint error">{qualityError}</p>
+        {/if}
+      {/if}
     {/if}
     <label class="check">
       <input
@@ -399,11 +466,6 @@
     flex-shrink: 0;
   }
 
-  .checks {
-    display: grid;
-    gap: 4px;
-  }
-
   .model-line {
     margin-top: 6px;
     display: flex;
@@ -422,10 +484,6 @@
     margin-bottom: 0;
     margin-top: 6px;
     cursor: pointer;
-  }
-
-  .checks .check {
-    margin-top: 0;
   }
 
   .hint,

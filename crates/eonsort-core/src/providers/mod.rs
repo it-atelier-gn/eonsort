@@ -9,11 +9,17 @@ pub mod xmp;
 use crate::suspect::{self, Flag};
 use chrono::{Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs::Metadata;
 use std::path::Path;
 
 const HARD_FLAG_PENALTY: i64 = 1000;
 const CONSENSUS_BONUS: i64 = 25;
+
+pub const MIN_WEIGHT: i64 = 0;
+pub const MAX_WEIGHT: i64 = 100;
+
+pub type Weights = BTreeMap<Provider, i64>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -60,7 +66,7 @@ impl Provider {
         }
     }
 
-    pub fn trust_rank(self) -> i64 {
+    pub fn default_weight(self) -> i64 {
         match self {
             Provider::Xmp => 42,
             Provider::Exif | Provider::Media => 40,
@@ -102,6 +108,8 @@ impl Strategy {
 pub struct DetectOptions {
     pub providers: Vec<Provider>,
     pub strategy: Strategy,
+    #[serde(default)]
+    pub weights: Weights,
 }
 
 impl Default for DetectOptions {
@@ -109,8 +117,37 @@ impl Default for DetectOptions {
         Self {
             providers: Provider::DEFAULT.to_vec(),
             strategy: Strategy::default(),
+            weights: Weights::new(),
         }
     }
+}
+
+impl DetectOptions {
+    pub fn weight_of(&self, provider: Provider) -> i64 {
+        self.weights
+            .get(&provider)
+            .copied()
+            .map(clamp_weight)
+            .unwrap_or_else(|| provider.default_weight())
+    }
+}
+
+pub fn clamp_weight(weight: i64) -> i64 {
+    weight.clamp(MIN_WEIGHT, MAX_WEIGHT)
+}
+
+pub fn default_weights() -> Weights {
+    Provider::ALL
+        .iter()
+        .map(|provider| (*provider, provider.default_weight()))
+        .collect()
+}
+
+pub fn clean_weights(weights: &Weights) -> Weights {
+    weights
+        .iter()
+        .map(|(provider, weight)| (*provider, clamp_weight(*weight)))
+        .collect()
 }
 
 pub struct DetectContext {
@@ -170,7 +207,7 @@ pub fn choose(
             .iter()
             .min_by(|a, b| a.taken.cmp(&b.taken).then(a.provider.cmp(&b.provider)))
             .cloned(),
-        Strategy::Smart => smart(candidates, ctx),
+        Strategy::Smart => smart(candidates, opts, ctx),
     }
 }
 
@@ -190,20 +227,28 @@ pub fn detect(path: &Path, meta: &Metadata, opts: &DetectOptions) -> Option<Dete
     resolve(path, meta, opts).map(|r| r.chosen)
 }
 
-fn smart(candidates: &[Detection], ctx: &DetectContext) -> Option<Detection> {
+fn smart(candidates: &[Detection], opts: &DetectOptions, ctx: &DetectContext) -> Option<Detection> {
     candidates
         .iter()
-        .map(|c| (score(c, candidates, ctx), c))
+        .map(|c| (score(c, candidates, opts, ctx), c))
         .max_by(|(left_score, left), (right_score, right)| {
             left_score
                 .cmp(right_score)
                 .then(right.taken.cmp(&left.taken))
-                .then(left.provider.trust_rank().cmp(&right.provider.trust_rank()))
+                .then(
+                    opts.weight_of(left.provider)
+                        .cmp(&opts.weight_of(right.provider)),
+                )
         })
         .map(|(_, c)| c.clone())
 }
 
-fn score(candidate: &Detection, candidates: &[Detection], ctx: &DetectContext) -> i64 {
+fn score(
+    candidate: &Detection,
+    candidates: &[Detection],
+    opts: &DetectOptions,
+    ctx: &DetectContext,
+) -> i64 {
     let penalties =
         suspect::date_flags(candidate.taken, ctx.filesystem_latest, ctx.now).len() as i64;
     let corroborators = candidates
@@ -214,7 +259,7 @@ fn score(candidate: &Detection, candidates: &[Detection], ctx: &DetectContext) -
         })
         .count() as i64;
 
-    candidate.provider.trust_rank() - HARD_FLAG_PENALTY * penalties
+    opts.weight_of(candidate.provider) - HARD_FLAG_PENALTY * penalties
         + CONSENSUS_BONUS * corroborators
 }
 
@@ -275,6 +320,7 @@ mod tests {
         DetectOptions {
             providers: Provider::ALL.to_vec(),
             strategy,
+            weights: Weights::new(),
         }
     }
 
@@ -411,6 +457,53 @@ mod tests {
     }
 
     #[test]
+    fn a_weight_of_your_own_decides_who_wins() {
+        let filename = detection(Provider::Filename, at(2005, 1, 2, 3, 4, 5));
+        let exif = detection(Provider::Exif, at(2007, 6, 5, 4, 3, 2));
+        let candidates = vec![filename.clone(), exif.clone()];
+        let ctx = context(at(2026, 1, 1, 0, 0, 0));
+
+        let mut opts = strategy(Strategy::Smart);
+        assert_eq!(choose(&candidates, &opts, &ctx).unwrap(), exif);
+
+        opts.weights.insert(Provider::Filename, 90);
+        assert_eq!(choose(&candidates, &opts, &ctx).unwrap(), filename);
+    }
+
+    #[test]
+    fn a_weight_outside_the_scale_is_pulled_back_in() {
+        let mut opts = strategy(Strategy::Smart);
+        opts.weights.insert(Provider::Exif, 5000);
+        opts.weights.insert(Provider::Filename, -20);
+        assert_eq!(opts.weight_of(Provider::Exif), MAX_WEIGHT);
+        assert_eq!(opts.weight_of(Provider::Filename), MIN_WEIGHT);
+    }
+
+    #[test]
+    fn a_source_nobody_weighed_keeps_the_weight_it_was_born_with() {
+        let opts = strategy(Strategy::Smart);
+        assert_eq!(
+            opts.weight_of(Provider::Xmp),
+            Provider::Xmp.default_weight()
+        );
+        assert_eq!(
+            default_weights()[&Provider::Xmp],
+            Provider::Xmp.default_weight()
+        );
+        assert_eq!(default_weights().len(), Provider::ALL.len());
+    }
+
+    #[test]
+    fn cleaning_the_weights_holds_every_one_of_them_to_the_scale() {
+        let mut asked = Weights::new();
+        asked.insert(Provider::Exif, 400);
+        asked.insert(Provider::Media, -1);
+        let clean = clean_weights(&asked);
+        assert_eq!(clean[&Provider::Exif], MAX_WEIGHT);
+        assert_eq!(clean[&Provider::Media], MIN_WEIGHT);
+    }
+
+    #[test]
     fn priority_strategy_follows_provider_order() {
         let dir = tempdir().unwrap();
         let path = write(dir.path(), "IMG_20050102_030405.dat");
@@ -419,6 +512,7 @@ mod tests {
         let opts = DetectOptions {
             providers: vec![Provider::Filesystem, Provider::Filename],
             strategy: Strategy::Priority,
+            weights: Weights::new(),
         };
         let found = detect(&path, &meta, &opts).unwrap();
         assert_eq!(found.provider, Provider::Filesystem);
@@ -433,6 +527,7 @@ mod tests {
         let opts = DetectOptions {
             providers: vec![Provider::Filename],
             strategy: Strategy::Oldest,
+            weights: Weights::new(),
         };
         assert!(detect(&path, &meta, &opts).is_none());
     }

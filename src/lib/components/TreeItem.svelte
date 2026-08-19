@@ -1,7 +1,7 @@
 <script lang="ts">
   import { formatBytes } from "$lib/api";
   import { folderKey, type TreeNode } from "$lib/tree";
-  import type { ColumnId } from "$lib/columns";
+  import type { TreeColumnId } from "$lib/columns";
   import Self from "./TreeItem.svelte";
 
   interface Props {
@@ -9,7 +9,7 @@
     depth: number;
     selected: string | null;
     expanded: Set<string>;
-    order: ColumnId[];
+    order: TreeColumnId[];
     grid: string;
     onSelect: (key: string) => void;
     onToggle: (path: string) => void;

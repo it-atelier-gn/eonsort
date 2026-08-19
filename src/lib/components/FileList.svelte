@@ -2,21 +2,67 @@
   import { formatBytes, type EntryView } from "$lib/api";
   import { CONFIDENCE_LABEL, CONFIDENCE_TONE, hardFlags, isSuspect } from "$lib/dates";
   import { nextRow } from "$lib/rows";
+  import ColumnHead from "./ColumnHead.svelte";
+  import {
+    FILE_COLUMNS,
+    template,
+    widthOf,
+    type ColumnWidths,
+    type FileColumnId,
+  } from "$lib/columns";
 
   interface Props {
     entries: EntryView[];
     folder: string | null;
     selected: EntryView | null;
     marked: string[];
+    order: FileColumnId[];
+    widths: ColumnWidths<FileColumnId>;
     onSelect: (entry: EntryView) => void;
     onMark: (sources: string[]) => void;
     onOpen: (entry: EntryView) => void;
+    onReorder: (order: FileColumnId[]) => void;
+    onResize: (id: FileColumnId, width: number | null) => void;
   }
 
-  let { entries, folder, selected, marked, onSelect, onMark, onOpen }: Props = $props();
+  let {
+    entries,
+    folder,
+    selected,
+    marked,
+    order,
+    widths,
+    onSelect,
+    onMark,
+    onOpen,
+    onReorder,
+    onResize,
+  }: Props = $props();
 
   let anchor = $state(-1);
-  let rows: HTMLTableRowElement[] = [];
+  let rows: HTMLElement[] = $state([]);
+
+  const grid = $derived(
+    template(FILE_COLUMNS, order, {
+      name: widths.name ?? 0,
+      date: widths.date ?? widthOf(FILE_COLUMNS, "date", entries.map((entry) => entry.taken)),
+      from: widths.from ?? widthOf(FILE_COLUMNS, "from", entries.map(provider)),
+      size:
+        widths.size ??
+        widthOf(
+          FILE_COLUMNS,
+          "size",
+          entries.map((entry) => formatBytes(entry.size)),
+        ),
+      status:
+        widths.status ??
+        widthOf(
+          FILE_COLUMNS,
+          "status",
+          entries.map((entry) => status(entry)?.label ?? ""),
+        ),
+    }),
+  );
 
   function status(entry: EntryView): { label: string; tone: string } | null {
     if (entry.outcome === "failed") return { label: "failed", tone: "danger" };
@@ -25,6 +71,10 @@
     if (entry.outcome === "copied") return { label: "copied", tone: "ok" };
     if (entry.destination_exists) return { label: "name taken", tone: "warn" };
     return null;
+  }
+
+  function provider(entry: EntryView): string {
+    return entry.override_origin ? "you" : entry.provider;
   }
 
   function dateTitle(entry: EntryView): string {
@@ -82,49 +132,58 @@
   {:else if entries.length === 0}
     <p class="placeholder faint">No files land directly in this folder.</p>
   {:else}
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Date</th>
-          <th>From</th>
-          <th class="right">Size</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each entries as entry, index (entry.source)}
-          {@const tag = status(entry)}
-          <tr
-            bind:this={rows[index]}
-            tabindex={(selected === null ? index === 0 : selected.source === entry.source) ? 0 : -1}
-            class:selected={selected?.source === entry.source}
-            class:marked={marked.includes(entry.source)}
-            onclick={(event) => click(event, entry, index)}
-            ondblclick={() => onOpen(entry)}
-            onkeydown={(event) => walk(event, index)}
-          >
-            <td class="truncate name" title={entry.destination}>{entry.name}</td>
-            <td class="mono nowrap dim date" title={dateTitle(entry)}>
+    <div class="grid" role="grid" aria-label="Files in this folder">
+      <ColumnHead set={FILE_COLUMNS} {order} {grid} {onReorder} {onResize} />
+      {#each entries as entry, index (entry.source)}
+        {@const tag = status(entry)}
+        <div
+          bind:this={rows[index]}
+          class="row"
+          role="row"
+          tabindex={(selected === null ? index === 0 : selected.source === entry.source) ? 0 : -1}
+          style="grid-template-columns: {grid}"
+          class:selected={selected?.source === entry.source}
+          class:marked={marked.includes(entry.source)}
+          onclick={(event) => click(event, entry, index)}
+          ondblclick={() => onOpen(entry)}
+          onkeydown={(event) => walk(event, index)}
+        >
+          {#each order as id (id)}
+            {#if id === "name"}
+              <span class="cell truncate name" role="gridcell" title={entry.destination}>
+                {entry.name}
+              </span>
+            {:else if id === "date"}
+              <span class="cell mono nowrap dim date" role="gridcell" title={dateTitle(entry)}>
+                <span
+                  class="dot {entry.override_origin ? 'info' : CONFIDENCE_TONE[entry.confidence]}"
+                  class:alarm={isSuspect(entry)}
+                ></span>
+                <span class="truncate">{entry.taken}</span>
+              </span>
+            {:else if id === "from"}
               <span
-                class="dot {entry.override_origin ? 'info' : CONFIDENCE_TONE[entry.confidence]}"
-                class:alarm={isSuspect(entry)}
-              ></span>
-              {entry.taken}
-            </td>
-            <td class="dim nowrap" title={entry.provider_info ?? entry.provider}>
-              {entry.override_origin ? "you" : entry.provider}
-            </td>
-            <td class="right mono nowrap dim">{formatBytes(entry.size)}</td>
-            <td class="right">
-              {#if tag}
-                <span class="badge {tag.tone}">{tag.label}</span>
-              {/if}
-            </td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
+                class="cell truncate dim nowrap"
+                role="gridcell"
+                title={entry.provider_info ?? entry.provider}
+              >
+                {provider(entry)}
+              </span>
+            {:else if id === "size"}
+              <span class="cell right mono nowrap dim" role="gridcell">
+                {formatBytes(entry.size)}
+              </span>
+            {:else}
+              <span class="cell right" role="gridcell">
+                {#if tag}
+                  <span class="badge {tag.tone}">{tag.label}</span>
+                {/if}
+              </span>
+            {/if}
+          {/each}
+        </div>
+      {/each}
+    </div>
   {/if}
 </div>
 
@@ -139,61 +198,31 @@
     font-size: 12px;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-  }
-
-  th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--bg-panel);
-    text-align: left;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-faint);
-    font-weight: 600;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  th:nth-child(2),
-  th:nth-child(3),
-  th:nth-child(4) {
-    width: 130px;
-  }
-
-  th:nth-child(3) {
-    width: 90px;
-  }
-
-  th:nth-child(5) {
-    width: 110px;
-  }
-
-  td {
-    padding: 5px 10px;
+  .row {
+    display: grid;
+    align-items: center;
+    gap: 6px;
+    padding-block: 5px;
+    padding-inline: 8px;
     border-bottom: 1px solid var(--border);
     font-size: 12px;
-  }
-
-  tr {
     cursor: pointer;
   }
 
-  tbody tr:hover {
+  .row:hover {
     background: var(--bg-hover);
   }
 
-  tbody tr.marked {
+  .row.marked {
     background: var(--bg-hover);
   }
 
-  tbody tr.selected {
+  .row.selected {
     background: var(--bg-active);
+  }
+
+  .cell {
+    min-width: 0;
   }
 
   .name {

@@ -404,7 +404,7 @@
     <div class="drift-field" id="driftField"></div>
     <div class="wrap hero-grid">
       <div>
-        <p class="eyebrow">Sorting by date · v0.0.8</p>
+        <p class="eyebrow">Sorting by date · v0.0.9</p>
         <h1>The date on the file<br>is not always <em>the date<br>it was made.</em></h1>
         <p class="lede">eonsort reads <strong>six independent sources</strong> for when a photo or file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. The complete result is shown as a preview before a byte is copied. <strong>Sources are only ever read.</strong></p>
         <div class="cta-row">
@@ -503,6 +503,8 @@
           <div class="desc">Walks the sources in order and stops at the first hit.</div>
         </div>
       </div>
+
+      <p class="reveal" style="margin-top:18px; color:var(--ink-faint);">A window of its own lists every source: drag them into the order <em>first match wins</em> walks, give each one a weight between 0 and 100 for how much it counts when the evidence is weighed, and untick the ones you never want asked.</p>
     </div>
   </section>
 
@@ -572,6 +574,10 @@
           <div class="desc">Flagged dates are grouped under Issues. Take the date from another source, type one in, or anchor a single file and shift a whole selection by that offset.</div>
         </div>
         <div class="rule">
+          <div class="name">A closer look</div>
+          <div class="desc">Hold Ctrl and turn the wheel over the preview to zoom into a picture, then drag to pan it; the small buttons in the corner do the same, and the zoom clears with the next file.</div>
+        </div>
+        <div class="rule">
           <div class="name">Corrections kept beside the plan</div>
           <div class="desc">Overrides and rotations are stored next to the plan file. They survive reopening, they are what the copy uses, and each one can be undone.</div>
         </div>
@@ -622,8 +628,8 @@
     <div class="wrap">
       <div class="section-head reveal">
         <p class="eyebrow">Views</p>
-        <h2>Three views of the same plan.</h2>
-        <p>Each view scopes to whatever was selected, so the folder tree, Timeline and Gallery show only those files. In the two walkable views: click to take the mouse, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, <kbd>Esc</kbd> to release it.</p>
+        <h2>Four views of the same plan.</h2>
+        <p>Each view scopes to whatever was selected, so the folder tree, Timeline, Gallery and Rings show only those files. In the walkable one: click to take the mouse, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, <kbd>Esc</kbd> to release it.</p>
       </div>
 
       <div class="filmstrip">
@@ -642,7 +648,7 @@
           <div class="frame-body">
             <div class="num">02 / GALLERY</div>
             <h3>Rooms built from the archive</h3>
-            <p>One room per period, oldest first, with a longer hall for a busy year. Pictures hang at eye height, videos play in frame, and daylight falls through a clerestory band. Rooms open into one another as a single enfilade.</p>
+            <p>A building laid out afresh for every collection: one room per period, sized by what it holds, shaped at random, turning left and right as it goes, with short corridors between. Daylight falls through the clerestory while lamps light the ceilings, the pictures and the passages. Pictures hang at eye height and videos play in frame.</p>
             <div class="kbdrow"><kbd>W A S D</kbd><kbd>E</kbd> open</div>
           </div>
           <div class="sprockets bottom"></div>
@@ -650,7 +656,17 @@
         <div class="frame reveal">
           <div class="sprockets top"></div>
           <div class="frame-body">
-            <div class="num">03 / CHARTS</div>
+            <div class="num">03 / RINGS</div>
+            <h3>A ring for every year</h3>
+            <p>One circle per year, stacked with the newest on top and widening with the files that landed in it, the pictures standing side by side around the rim and facing outwards. Every month has its own colour, so the seasons line up from ring to ring. <strong>Spiral</strong> unwinds the stack into one continuous coil. A slider lifts your eye through the years and another tilts it; pick a year and the view glides level with that ring. <strong>Turn</strong> lets the stack rotate on its own at whatever pace you set.</p>
+            <div class="kbdrow"><kbd>drag</kbd><kbd>wheel</kbd><kbd>click</kbd> open</div>
+          </div>
+          <div class="sprockets bottom"></div>
+        </div>
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">04 / CHARTS</div>
             <h3>The same questions in two dimensions</h3>
             <p>A square per month, year by year: click to go finer, drag for a range. Alongside it, time of day, which source supplied each date, how confident eonsort is, and where the bulk of the files lands. Any selection scopes the whole application.</p>
             <div class="kbdrow"><kbd>click</kbd><kbd>drag range</kbd></div>
@@ -660,10 +676,10 @@
         <div class="frame reveal">
           <div class="sprockets top"></div>
           <div class="frame-body">
-            <div class="num">04 / SEARCH</div>
-            <h3>Search pictures by content</h3>
-            <p>Once a scan has finished, pictures are tagged in the background, so the scan itself is never held up. Enter <code>forest and dog</code> in ordinary words and every view narrows to the pictures that match, ranked by how well. The model runs locally on the CPU.</p>
-            <div class="kbdrow"><kbd>Enter</kbd><kbd>Clear</kbd></div>
+            <div class="num">05 / SEARCH</div>
+            <h3>Search pictures by content, and find the good ones</h3>
+            <p>Once a scan has finished, pictures are tagged in the background, so the scan itself is never held up. Enter <code>forest and dog</code> in ordinary words and every view narrows to the pictures that match, ranked by how well. A second model can judge how good each picture looks, tagging the best <em>a good picture</em> and <em>a beautiful picture</em>; the tag box beside the search picks any tag out of the plan. Both models run locally on the CPU.</p>
+            <div class="kbdrow"><kbd>Enter</kbd><kbd>Clear</kbd><kbd>tag box</kbd></div>
           </div>
           <div class="sprockets bottom"></div>
         </div>
@@ -711,7 +727,7 @@
   <section id="download">
     <div class="wrap">
       <div class="section-head reveal">
-        <p class="eyebrow">Download · v0.0.8</p>
+        <p class="eyebrow">Download · v0.0.9</p>
         <h2>Pick your platform.</h2>
         <p>Free and open source under the MIT license. Installers are below, or build it yourself from source.</p>
       </div>
@@ -725,22 +741,22 @@
 
         <div class="os-panel" id="panel-windows">
           <div class="dl-list">
-            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.8/Eonsort_0.0.8_x64-setup.exe"><span class="name">Eonsort_0.0.8_x64-setup.exe</span><span class="size">recommended · NSIS installer</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.8/Eonsort_0.0.8_x64_en-US.msi"><span class="name">Eonsort_0.0.8_x64_en-US.msi</span><span class="size">MSI installer</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.8/eonsort-windows-x64-portable.zip"><span class="name">eonsort-windows-x64-portable.zip</span><span class="size">no install</span></a>
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_x64-setup.exe"><span class="name">Eonsort_0.0.9_x64-setup.exe</span><span class="size">recommended · NSIS installer</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_x64_en-US.msi"><span class="name">Eonsort_0.0.9_x64_en-US.msi</span><span class="size">MSI installer</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/eonsort-windows-x64-portable.zip"><span class="name">eonsort-windows-x64-portable.zip</span><span class="size">no install</span></a>
           </div>
         </div>
         <div class="os-panel" id="panel-mac">
           <div class="dl-list">
-            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.8/Eonsort_0.0.8_aarch64.dmg"><span class="name">Eonsort_0.0.8_aarch64.dmg</span><span class="size">recommended · Apple Silicon</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.8/Eonsort_0.0.8_x64.dmg"><span class="name">Eonsort_0.0.8_x64.dmg</span><span class="size">Intel</span></a>
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_aarch64.dmg"><span class="name">Eonsort_0.0.9_aarch64.dmg</span><span class="size">recommended · Apple Silicon</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_x64.dmg"><span class="name">Eonsort_0.0.9_x64.dmg</span><span class="size">Intel</span></a>
           </div>
         </div>
         <div class="os-panel" id="panel-linux">
           <div class="dl-list">
-            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.8/Eonsort_0.0.8_amd64.AppImage"><span class="name">Eonsort_0.0.8_amd64.AppImage</span><span class="size">recommended · runs anywhere</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.8/Eonsort_0.0.8_amd64.deb"><span class="name">Eonsort_0.0.8_amd64.deb</span><span class="size">Debian / Ubuntu</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.8/Eonsort-0.0.8-1.x86_64.rpm"><span class="name">Eonsort-0.0.8-1.x86_64.rpm</span><span class="size">Fedora / RHEL</span></a>
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_amd64.AppImage"><span class="name">Eonsort_0.0.9_amd64.AppImage</span><span class="size">recommended · runs anywhere</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_amd64.deb"><span class="name">Eonsort_0.0.9_amd64.deb</span><span class="size">Debian / Ubuntu</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort-0.0.9-1.x86_64.rpm"><span class="name">Eonsort-0.0.9-1.x86_64.rpm</span><span class="size">Fedora / RHEL</span></a>
           </div>
         </div>
         <p class="all-releases">Checksums, earlier versions, and CLI‑only tarballs are on the <a href="https://github.com/it-atelier-gn/eonsort/releases" target="_blank" rel="noopener">releases page ↗</a></p>

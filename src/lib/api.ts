@@ -11,16 +11,20 @@ export type Provider =
 export type Strategy = "smart" | "oldest" | "priority";
 export type Confidence = "high" | "medium" | "low";
 
+export type Weights = Partial<Record<Provider, number>>;
+
 export interface Settings {
   sources: string[];
   destination: string | null;
   folder_pattern: string;
   providers: Provider[];
   strategy: Strategy;
+  weights: Weights;
   follow_symlinks: boolean;
   auto_rotate: boolean;
   pair_companions: boolean;
   tag_pictures: boolean;
+  rate_quality: boolean;
   preserve_times: boolean;
   stamp_date: boolean;
   compare_hashes: boolean;
@@ -33,6 +37,7 @@ export interface ScanRequest {
   folder_pattern: string;
   providers: Provider[];
   strategy: Strategy;
+  weights: Weights;
   follow_symlinks: boolean;
   auto_rotate: boolean;
   pair_companions: boolean;
@@ -232,6 +237,7 @@ export type Thumbnail =
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const saveSettings = (settings: Settings) => invoke<void>("save_settings", { settings });
+export const openSourcesWindow = () => invoke<void>("open_sources_window");
 export const checkFolderPattern = (pattern: string) =>
   invoke<void>("check_folder_pattern", { pattern });
 export const cancelJob = () => invoke<void>("cancel_job");
@@ -298,6 +304,9 @@ export const cancelTagInstall = () => invoke<void>("cancel_tag_install");
 export const startTagging = () => invoke<number>("start_tagging");
 export const cancelTagging = () => invoke<void>("cancel_tagging");
 export const listTags = () => invoke<Record<string, string[]>>("list_tags");
+export const qualityModelStatus = () => invoke<TagModelStatus>("quality_model_status");
+export const installQualityModel = () => invoke<void>("install_quality_model");
+export const cancelQualityInstall = () => invoke<void>("cancel_quality_install");
 export const searchPictures = (words: string) => invoke<TagHit[]>("search_pictures", { words });
 export function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];

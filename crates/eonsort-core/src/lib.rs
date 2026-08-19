@@ -9,6 +9,7 @@ pub mod model;
 pub mod overrides;
 pub mod plan;
 pub mod providers;
+pub mod quality;
 pub mod rotate;
 pub mod scan;
 pub mod similar;

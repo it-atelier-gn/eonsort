@@ -9,6 +9,17 @@
   } from "$lib/api";
   import { CONFIDENCE_LABEL, CONFIDENCE_TONE, fromInputValue, toInputValue } from "$lib/dates";
   import { TRANSFORM_CSS, canTurn, describeRotation, swapsAxes } from "$lib/rotate";
+  import {
+    isResting,
+    pannedBy,
+    steppedIn,
+    steppedOut,
+    transformOf,
+    wheelFactor,
+    zoomedAt,
+    RESTING,
+    type Zoom,
+  } from "$lib/zoom";
 
   interface Props {
     entry: EntryView | null;
@@ -38,6 +49,9 @@
     onReencode,
   }: Props = $props();
 
+  let zoom = $state<Zoom>(RESTING);
+  let frame = $state<HTMLElement | null>(null);
+  let holding = $state(false);
   let manual = $state("");
   let anchored = $state("");
   let lossless = $state<boolean | null>(null);
@@ -46,6 +60,7 @@
   $effect(() => {
     if (entry && entry.source !== anchored) {
       anchored = entry.source;
+      zoom = RESTING;
       manual = toInputValue(entry.taken_epoch);
       lossless = null;
       losslessReason = null;
@@ -75,6 +90,41 @@
   });
 
   const manualIsValid = $derived(fromInputValue(manual) !== null);
+  const zoomable = $derived(preview?.kind === "image" || preview?.kind === "video");
+
+  function boxOf() {
+    const box = frame?.getBoundingClientRect();
+    return { width: box?.width ?? 0, height: box?.height ?? 0 };
+  }
+
+  function pointerIn(event: { clientX: number; clientY: number }) {
+    const box = frame?.getBoundingClientRect();
+    if (!box) return { x: 0, y: 0 };
+    return { x: event.clientX - (box.left + box.width / 2), y: event.clientY - (box.top + box.height / 2) };
+  }
+
+  function wheel(event: WheelEvent) {
+    if (!zoomable || !event.ctrlKey) return;
+    event.preventDefault();
+    zoom = zoomedAt(zoom, wheelFactor(event.deltaY), pointerIn(event), boxOf());
+  }
+
+  function grab(event: PointerEvent) {
+    if (!zoomable || isResting(zoom)) return;
+    holding = true;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  function drag(event: PointerEvent) {
+    if (!holding) return;
+    zoom = pannedBy(zoom, event.movementX, event.movementY, boxOf());
+  }
+
+  function drop(event: PointerEvent) {
+    const element = event.currentTarget as HTMLElement;
+    if (element.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
+    holding = false;
+  }
 </script>
 
 <aside class="pane">
@@ -84,7 +134,19 @@
       <p class="hint">Double-click a row to open it in your usual application.</p>
     </div>
   {:else}
-    <div class="visual">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="visual"
+      class:zoomed={!isResting(zoom)}
+      class:holding
+      bind:this={frame}
+      onwheel={wheel}
+      onpointerdown={grab}
+      onpointermove={drag}
+      onpointerup={drop}
+      onpointerleave={drop}
+    >
+      <div class="stage" style={transformOf(zoom) ? `transform: ${transformOf(zoom)}` : ""}>
       {#if loading}
         <p class="faint">Loading preview…</p>
       {:else if preview?.kind === "image"}
@@ -105,6 +167,35 @@
         <p class="faint">The source file is no longer there.</p>
       {:else}
         <p class="faint">No preview for this file type.</p>
+      {/if}
+      </div>
+
+      {#if zoomable}
+        <div class="zoomer">
+          <button
+            title="Zoom out"
+            aria-label="Zoom out"
+            disabled={isResting(zoom)}
+            onclick={() => (zoom = steppedOut(zoom, boxOf()))}
+          >
+            −
+          </button>
+          <button
+            title="Zoom in — or hold Ctrl and turn the wheel"
+            aria-label="Zoom in"
+            onclick={() => (zoom = steppedIn(zoom, boxOf()))}
+          >
+            +
+          </button>
+          <button
+            title="Back to the whole picture"
+            aria-label="Back to the whole picture"
+            disabled={isResting(zoom)}
+            onclick={() => (zoom = RESTING)}
+          >
+            ⟲
+          </button>
+        </div>
       {/if}
     </div>
 
@@ -275,6 +366,7 @@
   }
 
   .visual {
+    position: relative;
     --visual-height: 220px;
     flex-shrink: 0;
     height: 240px;
@@ -285,6 +377,58 @@
     border-bottom: 1px solid var(--border);
     overflow: hidden;
     padding: 10px;
+  }
+
+  .visual .stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    transform-origin: center;
+  }
+
+  .visual.zoomed {
+    cursor: grab;
+  }
+
+  .visual.holding {
+    cursor: grabbing;
+  }
+
+  .visual img,
+  .visual video {
+    cursor: grab;
+  }
+
+  .visual.holding img,
+  .visual.holding video {
+    cursor: grabbing;
+  }
+
+  .zoomer {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    display: flex;
+    gap: 3px;
+    opacity: 0.35;
+    transition: opacity 120ms ease;
+  }
+
+  .visual:hover .zoomer {
+    opacity: 1;
+  }
+
+  .zoomer button {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .visual img {

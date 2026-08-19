@@ -1,3 +1,24 @@
+
+const LIGHTS = `
+const int MAX_LIGHTS = 8;
+uniform int u_lightCount;
+uniform vec3 u_lightAt[MAX_LIGHTS];
+uniform vec3 u_lightTone[MAX_LIGHTS];
+
+vec3 lampLight(vec3 position, vec3 normal) {
+  vec3 sum = vec3(0.0);
+  for (int i = 0; i < MAX_LIGHTS; i++) {
+    if (i >= u_lightCount) break;
+    vec3 toLamp = u_lightAt[i] - position;
+    float distance = length(toLamp);
+    float fall = 1.0 / (1.0 + 0.16 * distance + 0.055 * distance * distance);
+    float lambert = max(0.0, dot(normalize(normal), toLamp / max(distance, 0.001)));
+    sum += u_lightTone[i] * fall * (0.2 + 0.8 * lambert);
+  }
+  return min(sum, vec3(1.15));
+}
+`;
+
 const FOG = `
 vec3 withFog(vec3 colour, float depth) {
   float amount = 1.0 - exp(-depth * 0.014);
@@ -39,9 +60,9 @@ in float v_depth;
 
 uniform vec3 u_eye;
 uniform float u_clerestory;
-uniform float u_halfWidth;
 
 out vec4 fragment;
+${LIGHTS}
 ${FOG}
 
 void main() {
@@ -54,12 +75,13 @@ void main() {
   vec3 ambient = mix(vec3(0.10, 0.11, 0.14), vec3(0.44, 0.47, 0.55), sky);
 
   float toWindow = clamp(1.0 - abs(v_position.y - u_clerestory) / 5.0, 0.0, 1.0);
-  float sideGlow = pow(clamp(abs(v_position.x) / u_halfWidth, 0.0, 1.0), 2.0);
-  vec3 daylight = vec3(1.02, 0.97, 0.86) * (key * 0.55 + toWindow * 0.35 + sideGlow * 0.18);
+  vec3 daylight = vec3(1.02, 0.97, 0.86) * (key * 0.55 + toWindow * 0.42);
 
   float pool = clamp(1.0 - v_position.y * 0.22, 0.0, 1.0);
   float bounce = max(0.0, normal.y) * 0.18;
-  vec3 colour = v_shade * (ambient + daylight + bounce) + vec3(0.06, 0.055, 0.05) * pool;
+  vec3 lamps = lampLight(v_position, normal);
+  vec3 colour =
+    v_shade * (ambient + daylight + bounce + lamps) + vec3(0.06, 0.055, 0.05) * pool;
 
   colour = pow(colour, vec3(0.92));
   fragment = vec4(withFog(colour, v_depth), 1.0);
@@ -74,7 +96,7 @@ in vec2 a_corner;
 uniform mat4 u_viewProjection;
 uniform vec3 u_centre;
 uniform vec2 u_size;
-uniform float u_facing;
+uniform vec2 u_outward;
 uniform vec3 u_eye;
 
 out vec2 v_uv;
@@ -82,7 +104,7 @@ out float v_depth;
 out vec3 v_position;
 
 void main() {
-  vec3 right = vec3(0.0, 0.0, -u_facing);
+  vec3 right = vec3(u_outward.y, 0.0, -u_outward.x);
   vec3 up = vec3(0.0, 1.0, 0.0);
   vec3 world = u_centre + right * a_corner.x * u_size.x + up * a_corner.y * u_size.y;
 
@@ -103,8 +125,10 @@ in vec3 v_position;
 uniform sampler2D u_image;
 uniform float u_ready;
 uniform float u_highlight;
+uniform vec2 u_outward;
 
 out vec4 fragment;
+${LIGHTS}
 ${FOG}
 
 void main() {
@@ -112,7 +136,9 @@ void main() {
   float frame = 0.055;
 
   if (uv.x < frame || uv.x > 1.0 - frame || uv.y < frame || uv.y > 1.0 - frame) {
-    vec3 wood = mix(vec3(0.13, 0.12, 0.12), vec3(0.30, 0.28, 0.26), u_highlight);
+    vec3 lit = lampLight(v_position, vec3(u_outward.x, 0.0, u_outward.y));
+    vec3 wood =
+      mix(vec3(0.13, 0.12, 0.12), vec3(0.30, 0.28, 0.26), u_highlight) * (0.7 + lit * 0.6);
     fragment = vec4(withFog(wood, v_depth), 1.0);
     return;
   }
@@ -123,9 +149,12 @@ void main() {
     colour = vec3(0.055, 0.06, 0.075);
   }
 
-  float lamp = 1.25 - 0.55 * clamp(inner.y, 0.0, 1.0);
+  vec3 normal = vec3(u_outward.x, 0.0, u_outward.y);
+  vec3 lamps = lampLight(v_position, normal);
+  float lit = 0.75 + 0.32 * clamp(lamps.r + lamps.g + lamps.b, 0.0, 1.4);
+  float fall = 1.15 - 0.4 * clamp(inner.y, 0.0, 1.0);
   float edge = smoothstep(0.0, 0.14, inner.x) * smoothstep(0.0, 0.14, 1.0 - inner.x);
-  colour *= lamp * mix(0.86, 1.0, edge);
+  colour *= lit * fall * mix(0.86, 1.0, edge);
   colour += u_highlight * 0.16;
 
   fragment = vec4(withFog(colour, v_depth), 1.0);

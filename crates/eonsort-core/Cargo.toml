@@ -13,6 +13,7 @@ download = ["ureq/rustls"]
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
 upright = ["candle", "download"]
 tagging = ["candle", "download", "dep:tokenizers"]
+quality = ["candle", "download"]
 
 [dependencies]
 base64.workspace = true

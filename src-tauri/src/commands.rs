@@ -7,7 +7,8 @@ use eonsort_core::model::PlanEntry;
 use eonsort_core::overrides::{
     self, DateOverride, OverrideOrigin, Overrides, RotationOverride, Rotations,
 };
-use eonsort_core::providers::{DetectOptions, Provider, Strategy};
+use eonsort_core::providers::{DetectOptions, Provider, Strategy, Weights};
+use eonsort_core::quality;
 use eonsort_core::rotate::{self, Transform};
 use eonsort_core::scan::{ScanOptions, ScanProgress};
 use eonsort_core::similar;
@@ -26,6 +27,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(60);
+const SOURCES_WINDOW: &str = "sources";
 const TAG_BATCH: usize = 40;
 const SEARCH_LIMIT: usize = 500;
 
@@ -37,6 +39,8 @@ pub struct ScanRequest {
     pub folder_pattern: String,
     pub providers: Vec<Provider>,
     pub strategy: Strategy,
+    #[serde(default)]
+    pub weights: Weights,
     pub follow_symlinks: bool,
     #[serde(default)]
     pub auto_rotate: bool,
@@ -144,7 +148,30 @@ pub fn get_settings(app: AppHandle) -> Settings {
 
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
-    settings::save(&app, &settings)
+    settings::save(&app, &settings)?;
+    let saved = settings::load(&app);
+    app.emit("settings:changed", saved)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn open_sources_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(SOURCES_WINDOW) {
+        window.show().map_err(|e| e.to_string())?;
+        return window.set_focus().map_err(|e| e.to_string());
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        SOURCES_WINDOW,
+        tauri::WebviewUrl::App("sources".into()),
+    )
+    .title("Where dates come from")
+    .inner_size(560.0, 660.0)
+    .min_inner_size(420.0, 480.0)
+    .build()
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -187,6 +214,7 @@ pub fn start_scan(
         detect: DetectOptions {
             providers: request.providers,
             strategy: request.strategy,
+            weights: request.weights,
         },
         follow_symlinks: request.follow_symlinks,
         auto_rotate: request.auto_rotate,
@@ -1105,6 +1133,66 @@ pub struct TagHit {
 }
 
 #[tauri::command]
+pub fn quality_model_status(app: AppHandle) -> Result<TagModelStatus, String> {
+    let dir = models_directory(&app)?;
+    Ok(TagModelStatus {
+        present: quality::installed(&dir),
+        bytes: quality::present_bytes(&dir),
+        total: quality::total_bytes(),
+        built_in: cfg!(feature = "quality"),
+    })
+}
+
+#[tauri::command]
+pub fn install_quality_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if !cfg!(feature = "quality") {
+        return Err("this build was made without the quality model".into());
+    }
+
+    {
+        let mut fetching = state.fetching_quality.lock().unwrap();
+        if *fetching {
+            return Err("the quality model is already downloading".into());
+        }
+        *fetching = true;
+    }
+
+    state.quality_cancel.store(false, Ordering::Relaxed);
+    let dir = models_directory(&app)?;
+    let handle = app.clone();
+
+    std::thread::spawn(move || {
+        let state = handle.state::<AppState>();
+        let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
+
+        let result = quality::download(
+            &dir,
+            &state.quality_cancel,
+            &|progress: quality::QualityProgress| {
+                emit_throttled(&handle, "quality:fetch", &progress, &throttle);
+            },
+        );
+        *state.fetching_quality.lock().unwrap() = false;
+
+        match result {
+            Ok(()) => {
+                let _ = handle.emit("quality:fetched", quality::present_bytes(&dir));
+            }
+            Err(err) => {
+                let _ = handle.emit("quality:error", err.to_string());
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_quality_install(state: State<'_, AppState>) {
+    state.quality_cancel.store(true, Ordering::Relaxed);
+}
+
+#[tauri::command]
 pub fn tag_model_status(app: AppHandle) -> Result<TagModelStatus, String> {
     let dir = models_directory(&app)?;
     Ok(TagModelStatus {
@@ -1199,6 +1287,8 @@ pub fn start_tagging(app: AppHandle, state: State<'_, AppState>) -> Result<usize
         return Err("the tagging model is not downloaded yet".into());
     }
 
+    let rating = settings::load(&app).rate_quality && quality::installed(&dir);
+
     let Some(store) = tag_store(&app) else {
         return Err("run a scan first".into());
     };
@@ -1229,7 +1319,7 @@ pub fn start_tagging(app: AppHandle, state: State<'_, AppState>) -> Result<usize
 
     std::thread::spawn(move || {
         let state = handle.state::<AppState>();
-        let result = tag_everything(&handle, &dir, &store, pictures, &state.tag_cancel);
+        let result = tag_everything(&handle, &dir, &store, pictures, rating, &state.tag_cancel);
         *state.tagging.lock().unwrap() = false;
 
         match result {
@@ -1250,9 +1340,15 @@ fn tag_everything(
     dir: &Path,
     store: &Path,
     pictures: Vec<PathBuf>,
+    rating: bool,
     cancel: &AtomicBool,
 ) -> Result<usize, String> {
     let tagger = tagging::Tagger::load(dir).map_err(|e| e.to_string())?;
+    let rater = if rating {
+        Some(quality::Rater::load(dir).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
     let mut stored = tags::read(store).map_err(|e| e.to_string())?;
     stored.keep_only(&pictures);
 
@@ -1283,11 +1379,20 @@ fn tag_everything(
 
         match tagger.look(&source) {
             Ok(seen) => {
+                let score = rater
+                    .as_ref()
+                    .and_then(|rater| rater.score(&source).ok())
+                    .filter(|score| score.is_finite());
+                let mut tags = seen.tags;
+                if let Some(score) = score {
+                    tags.extend(quality::tags_for(score));
+                }
                 stored.set(
                     source,
                     tags::Sighting {
-                        tags: seen.tags,
+                        tags,
                         vector: seen.vector,
+                        quality: score,
                     },
                 );
                 since_written += 1;

@@ -15,6 +15,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 default = []
 upright = ["eonsort-core/upright"]
 tagging = ["eonsort-core/tagging"]
+quality = ["eonsort-core/quality"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

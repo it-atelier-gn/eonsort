@@ -1,16 +1,19 @@
-import { bindAttribute, createBuffer, createProgram, updateBuffer } from "../gl";
+import { bindAttribute, createBuffer, createProgram, imageTexture, updateBuffer } from "../gl";
 import { lookAt, multiply, perspective } from "../camera";
 import {
   buildGallery,
+  buildLampQuads,
   buildPaneQuads,
+  nearestLamps,
   roomAt,
+  standing,
   CLERESTORY_BASE,
   CLERESTORY_HEIGHT,
   EMPTY_GALLERY,
   EYE_HEIGHT,
-  ROOM_WIDTH,
   type Frame,
   type Gallery,
+  type Lamp,
   type Room,
 } from "./index";
 import { buildRoomMesh, buildShaftQuads } from "./geometry";
@@ -27,6 +30,7 @@ import type { EntryView } from "$lib/api";
 
 export const DRAW_DISTANCE = 62;
 export const NEAR_DISTANCE = 26;
+export const MAX_LIGHTS = 8;
 
 export interface GalleryCallbacks {
   onRoom: (room: Room | null) => void;
@@ -58,6 +62,7 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
     shade: createBuffer(gl, empty),
     pane: createBuffer(gl, empty),
     shaft: createBuffer(gl, empty),
+    lamp: createBuffer(gl, empty),
   };
 
   const blank = solidTexture(gl, [12, 14, 20, 255]);
@@ -67,6 +72,7 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
   let roomCount = 0;
   let paneCount = 0;
   let shaftCount = 0;
+  let lampCount = 0;
   let walker: Walker = { x: 0, z: 3, yaw: 0, pitch: 0, vx: 0, vz: 0 };
   let intent: Intent = { forward: 0, strafe: 0, running: false };
   let currentRoom: Room | null = null;
@@ -93,6 +99,10 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
     updateBuffer(gl!, buffers.shaft, shafts.position);
     shaftCount = shafts.count;
 
+    const fittings = buildLampQuads(gallery);
+    updateBuffer(gl!, buffers.lamp, fittings.position);
+    lampCount = fittings.count;
+
     for (const entry of media.values()) {
       gl!.deleteTexture(entry.texture);
       entry.video?.pause();
@@ -100,9 +110,9 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
     media.clear();
 
     walker = {
-      x: 0,
-      z: gallery.rooms.length > 0 ? gallery.rooms[0].z0 + 1.6 : 1.6,
-      yaw: Math.PI,
+      x: gallery.start.x,
+      z: gallery.start.z,
+      yaw: gallery.start.yaw,
       pitch: 0,
       vx: 0,
       vz: 0,
@@ -152,7 +162,7 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
   function visibleFrames(): Frame[] {
     const out: Frame[] = [];
     for (const item of gallery.frames) {
-      if (Math.abs(item.z - walker.z) > DRAW_DISTANCE) continue;
+      if (Math.hypot(item.x - walker.x, item.z - walker.z) > DRAW_DISTANCE) continue;
       out.push(item);
     }
     return out;
@@ -188,7 +198,7 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
 
     walker = step(walker, intent, gallery.solids, seconds);
 
-    const room = roomAt(gallery, walker.z);
+    const room = roomAt(gallery, walker.x, walker.z);
     if (room?.key !== currentRoom?.key) {
       currentRoom = room;
       callbacks.onRoom(room);
@@ -196,7 +206,7 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
 
     const frames = visibleFrames();
     const near = frames
-      .filter((item) => Math.abs(item.z - walker.z) < NEAR_DISTANCE)
+      .filter((item) => Math.hypot(item.x - walker.x, item.z - walker.z) < NEAR_DISTANCE)
       .map((item) => item.entry);
     if (near.length !== nearby.length || near.some((id, i) => id !== nearby[i])) {
       nearby = near;
@@ -211,6 +221,7 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
 
     const mvp = matrix();
     const { eye } = eyeTarget(walker, EYE_HEIGHT);
+    const lamps = nearestLamps(gallery.lamps, walker.x, walker.z, MAX_LIGHTS);
 
     gl!.viewport(0, 0, canvas.width, canvas.height);
     gl!.clearColor(0.045, 0.055, 0.075, 1);
@@ -231,11 +242,11 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
       gl!.getUniformLocation(roomProgram, "u_clerestory"),
       CLERESTORY_BASE + CLERESTORY_HEIGHT / 2,
     );
-    gl!.uniform1f(gl!.getUniformLocation(roomProgram, "u_halfWidth"), ROOM_WIDTH / 2);
+    shine(roomProgram, lamps);
     gl!.drawArrays(gl!.TRIANGLES, 0, roomCount);
 
     gl!.disable(gl!.CULL_FACE);
-    drawArtwork(mvp, eye, frames);
+    drawArtwork(mvp, eye, frames, lamps);
 
     gl!.enable(gl!.BLEND);
     gl!.blendFunc(gl!.SRC_ALPHA, gl!.ONE);
@@ -255,23 +266,53 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
     gl!.uniform1f(gl!.getUniformLocation(glowProgram, "u_strength"), 0.13);
     gl!.drawArrays(gl!.TRIANGLES, 0, shaftCount);
 
+    bindAttribute(gl!, glowProgram, "a_position", buffers.lamp, 3);
+    gl!.uniform3f(gl!.getUniformLocation(glowProgram, "u_colour"), 1.0, 0.9, 0.72);
+    gl!.uniform1f(gl!.getUniformLocation(glowProgram, "u_strength"), 1.0);
+    gl!.drawArrays(gl!.TRIANGLES, 0, lampCount);
+
     gl!.depthMask(true);
     gl!.disable(gl!.BLEND);
 
     frame = requestAnimationFrame(render);
   }
 
-  function drawArtwork(mvp: Float32Array, eye: [number, number, number], frames: Frame[]) {
+  function shine(program: WebGLProgram, lamps: Lamp[]) {
+    const at = new Float32Array(MAX_LIGHTS * 3);
+    const tone = new Float32Array(MAX_LIGHTS * 3);
+
+    lamps.forEach((lamp, index) => {
+      at[index * 3] = lamp.x;
+      at[index * 3 + 1] = lamp.y;
+      at[index * 3 + 2] = lamp.z;
+      const warm = lamp.warm;
+      tone[index * 3] = lamp.strength * (0.9 + 0.16 * warm);
+      tone[index * 3 + 1] = lamp.strength * (0.86 + 0.08 * warm);
+      tone[index * 3 + 2] = lamp.strength * (0.82 - 0.12 * warm);
+    });
+
+    gl!.uniform1i(gl!.getUniformLocation(program, "u_lightCount"), lamps.length);
+    gl!.uniform3fv(gl!.getUniformLocation(program, "u_lightAt"), at);
+    gl!.uniform3fv(gl!.getUniformLocation(program, "u_lightTone"), tone);
+  }
+
+  function drawArtwork(
+    mvp: Float32Array,
+    eye: [number, number, number],
+    frames: Frame[],
+    lamps: Lamp[],
+  ) {
     gl!.useProgram(artProgram);
     bindAttribute(gl!, artProgram, "a_corner", corners, 2);
     gl!.uniformMatrix4fv(gl!.getUniformLocation(artProgram, "u_viewProjection"), false, mvp);
     gl!.uniform3fv(gl!.getUniformLocation(artProgram, "u_eye"), eye);
     gl!.activeTexture(gl!.TEXTURE0);
     gl!.uniform1i(gl!.getUniformLocation(artProgram, "u_image"), 0);
+    shine(artProgram, lamps);
 
     const centre = gl!.getUniformLocation(artProgram, "u_centre");
     const size = gl!.getUniformLocation(artProgram, "u_size");
-    const facing = gl!.getUniformLocation(artProgram, "u_facing");
+    const outward = gl!.getUniformLocation(artProgram, "u_outward");
     const ready = gl!.getUniformLocation(artProgram, "u_ready");
     const highlight = gl!.getUniformLocation(artProgram, "u_highlight");
 
@@ -293,7 +334,7 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
 
       gl!.uniform3f(centre, item.x, item.y, item.z);
       gl!.uniform2f(size, item.width, item.height);
-      gl!.uniform1f(facing, item.facing);
+      gl!.uniform2f(outward, item.nx, item.nz);
       gl!.uniform1f(ready, found ? 1 : 0);
       gl!.uniform1f(highlight, item.entry === lookingAt ? 1 : 0);
       gl!.drawArrays(gl!.TRIANGLES, 0, 6);
@@ -315,7 +356,8 @@ export function createGallery(canvas: HTMLCanvasElement, callbacks: GalleryCallb
       return gallery.rooms;
     },
     goTo(room: Room) {
-      walker = { ...walker, x: 0, z: room.z0 + 1.6, yaw: Math.PI, vx: 0, vz: 0 };
+      const spot = standing(room, gallery.solids);
+      walker = { ...walker, x: spot.x, z: spot.z, yaw: spot.yaw, vx: 0, vz: 0 };
     },
     dispose() {
       disposed = true;
@@ -346,19 +388,6 @@ function solidTexture(gl: WebGL2RenderingContext, rgba: number[]): WebGLTexture 
     new Uint8Array(rgba),
   );
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  return texture;
-}
-
-function imageTexture(gl: WebGL2RenderingContext, image: TexImageSource): WebGLTexture {
-  const texture = gl.createTexture();
-  if (!texture) throw new Error("could not create a WebGL texture");
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-  gl.generateMipmap(gl.TEXTURE_2D);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);

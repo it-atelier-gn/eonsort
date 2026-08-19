@@ -111,7 +111,7 @@ fn rank(entry: &PlanEntry) -> (Kind, i64, std::cmp::Reverse<String>) {
 
     (
         kind(extension_of(&name)),
-        entry.provider.trust_rank(),
+        entry.provider.default_weight(),
         std::cmp::Reverse(name),
     )
 }

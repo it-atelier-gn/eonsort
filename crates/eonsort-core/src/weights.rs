@@ -17,8 +17,30 @@ pub struct Progress {
     pub total: u64,
 }
 
+fn folder(weight: &Weight) -> String {
+    weight.repo.replace('/', "--")
+}
+
+fn sized(path: &Path, weight: &Weight) -> bool {
+    std::fs::metadata(path)
+        .map(|meta| meta.len() == weight.bytes)
+        .unwrap_or(false)
+}
+
+pub fn own_path_of(dir: &Path, weight: &Weight) -> PathBuf {
+    dir.join(folder(weight)).join(weight.file)
+}
+
 pub fn path_of(dir: &Path, weight: &Weight) -> PathBuf {
-    dir.join(weight.file)
+    let own = own_path_of(dir, weight);
+    if own.exists() {
+        return own;
+    }
+    let shared = dir.join(weight.file);
+    if sized(&shared, weight) {
+        return shared;
+    }
+    own
 }
 
 pub fn total_bytes(weights: &[Weight]) -> u64 {
@@ -34,17 +56,28 @@ pub fn present_bytes(dir: &Path, weights: &[Weight]) -> u64 {
 }
 
 pub fn installed(dir: &Path, weights: &[Weight]) -> bool {
-    weights.iter().all(|weight| path_of(dir, weight).exists())
+    weights
+        .iter()
+        .all(|weight| sized(&path_of(dir, weight), weight))
 }
 
 pub fn remove(dir: &Path, weights: &[Weight]) -> Result<()> {
     for weight in weights {
-        let path = path_of(dir, weight);
+        let path = own_path_of(dir, weight);
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(Error::io(&path, e)),
         }
+        let shared = dir.join(weight.file);
+        if sized(&shared, weight) {
+            match std::fs::remove_file(&shared) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(Error::io(&shared, e)),
+            }
+        }
+        let _ = std::fs::remove_dir(dir.join(folder(weight)));
     }
     Ok(())
 }
@@ -59,10 +92,10 @@ pub fn download(
     std::fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
     for weight in weights {
         let target = path_of(dir, weight);
-        if target.exists() {
+        if sized(&target, weight) {
             continue;
         }
-        fetch(weight, &target, cancel, on_progress)?;
+        fetch(weight, &own_path_of(dir, weight), cancel, on_progress)?;
     }
     Ok(())
 }
@@ -191,16 +224,61 @@ mod tests {
         assert_eq!(present_bytes(dir.path(), &SAMPLE), 0);
     }
 
+    fn put(dir: &Path, weight: &Weight, bytes: usize) -> PathBuf {
+        let path = own_path_of(dir, weight);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, vec![0u8; bytes]).unwrap();
+        path
+    }
+
     #[test]
     fn a_half_finished_download_does_not_count_as_installed() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(path_of(dir.path(), &SAMPLE[0]), [0u8; 10]).unwrap();
+        put(dir.path(), &SAMPLE[0], 10);
         assert!(!installed(dir.path(), &SAMPLE));
         assert_eq!(present_bytes(dir.path(), &SAMPLE), 10);
 
-        std::fs::write(path_of(dir.path(), &SAMPLE[1]), [0u8; 32]).unwrap();
+        put(dir.path(), &SAMPLE[1], 32);
         assert!(installed(dir.path(), &SAMPLE));
         assert_eq!(present_bytes(dir.path(), &SAMPLE), 42);
+    }
+
+    #[test]
+    fn a_file_of_the_wrong_length_is_not_the_weight() {
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), &SAMPLE[0], 10);
+        put(dir.path(), &SAMPLE[1], 7);
+        assert!(!installed(dir.path(), &SAMPLE));
+    }
+
+    #[test]
+    fn each_model_keeps_its_files_in_its_own_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = Weight {
+            repo: "someone-else/another-model",
+            revision: SAMPLE[0].revision,
+            file: SAMPLE[0].file,
+            bytes: SAMPLE[0].bytes,
+        };
+        assert_ne!(
+            own_path_of(dir.path(), &SAMPLE[0]),
+            own_path_of(dir.path(), &other)
+        );
+    }
+
+    #[test]
+    fn a_shared_file_is_taken_over_only_when_its_length_agrees() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join(SAMPLE[0].file);
+        std::fs::write(&shared, [0u8; 3]).unwrap();
+        assert_eq!(
+            path_of(dir.path(), &SAMPLE[0]),
+            own_path_of(dir.path(), &SAMPLE[0])
+        );
+        assert!(!installed(dir.path(), &SAMPLE));
+
+        std::fs::write(&shared, [0u8; 10]).unwrap();
+        assert_eq!(path_of(dir.path(), &SAMPLE[0]), shared);
     }
 
     #[test]
@@ -208,8 +286,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         remove(dir.path(), &SAMPLE).unwrap();
 
-        std::fs::write(path_of(dir.path(), &SAMPLE[0]), [0u8; 10]).unwrap();
+        let path = put(dir.path(), &SAMPLE[0], 10);
         remove(dir.path(), &SAMPLE).unwrap();
-        assert!(!path_of(dir.path(), &SAMPLE[0]).exists());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn removing_also_clears_a_file_taken_over_from_the_shared_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join(SAMPLE[0].file);
+        std::fs::write(&shared, [0u8; 10]).unwrap();
+        remove(dir.path(), &SAMPLE).unwrap();
+        assert!(!shared.exists());
+    }
+
+    #[test]
+    fn removing_leaves_a_stranger_of_another_length_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join(SAMPLE[0].file);
+        std::fs::write(&shared, [0u8; 3]).unwrap();
+        remove(dir.path(), &SAMPLE).unwrap();
+        assert!(shared.exists());
     }
 }
