@@ -34,7 +34,14 @@ Windows, Linux and macOS — desktop app and `eonsort` command line tool.
 | **File name** | `IMG_20230506_101112.jpg`, `Screenshot 2021-07-04 at 09.05.01.png`, `Rechnung 06.05.2021.pdf`, and many more shapes |
 | **EXIF** | `DateTimeOriginal` and friends in JPEG, TIFF, PNG, WebP, HEIF and common raw formats |
 | **Media** | Recording time in the `mvhd` box of MP4, MOV, M4A and related containers |
+| **Google Takeout** | `photoTakenTime` in the JSON sidecar a Google Photos export leaves beside each file |
 | **File system** | Whichever of created / modified is older |
+
+A Google Photos export is the most common way a collection loses its dates: Takeout strips the
+capture time out of the file and parks it in a sidecar. Eonsort reads that sidecar back, including
+the shapes Takeout actually writes — `IMG_1234.JPG.json`, `IMG_1234.JPG.supplemental-metadata.json`,
+names cut short to fit its 51 character limit, `IMG_1234.JPG(1).json` beside a numbered copy, and an
+`-edited` picture falling back to the original's sidecar.
 
 Every source that reports a date is kept. Each can be switched off. Three rules choose between them:
 

@@ -2,6 +2,7 @@ mod exif;
 mod filename;
 mod filesystem;
 mod media;
+pub mod takeout;
 
 use crate::suspect::{self, Flag};
 use chrono::{Local, NaiveDateTime};
@@ -18,21 +19,24 @@ pub enum Provider {
     Filename,
     Exif,
     Media,
+    Takeout,
     Filesystem,
 }
 
 impl Provider {
-    pub const ALL: [Provider; 4] = [
+    pub const ALL: [Provider; 5] = [
         Provider::Filename,
         Provider::Exif,
         Provider::Media,
+        Provider::Takeout,
         Provider::Filesystem,
     ];
 
-    pub const DEFAULT: [Provider; 4] = [
+    pub const DEFAULT: [Provider; 5] = [
         Provider::Filename,
         Provider::Exif,
         Provider::Media,
+        Provider::Takeout,
         Provider::Filesystem,
     ];
 
@@ -41,6 +45,7 @@ impl Provider {
             Provider::Filename => "filename",
             Provider::Exif => "exif",
             Provider::Media => "media",
+            Provider::Takeout => "takeout",
             Provider::Filesystem => "filesystem",
         }
     }
@@ -48,6 +53,7 @@ impl Provider {
     pub fn trust_rank(self) -> i64 {
         match self {
             Provider::Exif | Provider::Media => 40,
+            Provider::Takeout => 38,
             Provider::Filename => 30,
             Provider::Filesystem => 10,
         }
@@ -193,6 +199,7 @@ fn run(provider: Provider, path: &Path, meta: &Metadata) -> Option<Detection> {
         Provider::Filename => filename::detect(path),
         Provider::Exif => exif::detect(path),
         Provider::Media => media::detect(path),
+        Provider::Takeout => takeout::detect(path),
         Provider::Filesystem => filesystem::detect(meta),
     }
 }
