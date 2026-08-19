@@ -4,12 +4,12 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>eonsort: sort files by the date they were actually made</title>
-<meta name="description" content="eonsort reads four independent sources for when a file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. The full result is shown before anything is copied. Sources are only ever read." />
+<meta name="description" content="eonsort reads five independent sources for when a file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. The full result is shown before anything is copied. Sources are only ever read." />
 <meta name="theme-color" content="#06121f" />
 <link rel="icon" href="favicon.png" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <meta property="og:title" content="eonsort: sort files by the date they were actually made" />
-<meta property="og:description" content="Four date sources, cross-checked. The complete destination tree is shown as a preview before a byte is copied. Sources are only ever read." />
+<meta property="og:description" content="Five date sources, cross-checked. The complete destination tree is shown as a preview before a byte is copied. Sources are only ever read." />
 <meta property="og:image" content="https://it-atelier-gn.github.io/eonsort/screenshot.png" />
 <meta property="og:type" content="website" />
 <meta name="twitter:card" content="summary_large_image" />
@@ -239,7 +239,8 @@
   .reveal.in{ opacity:1; transform:none; }
 
   /* source cards */
-  .sources-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:22px; }
+  .sources-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:22px; }
+  @media (max-width:1100px){ .sources-grid{ grid-template-columns:repeat(3,1fr); } }
   @media (max-width:900px){ .sources-grid{ grid-template-columns:repeat(2,1fr); } }
   @media (max-width:600px){ .sources-grid{ grid-template-columns:1fr; } }
 
@@ -388,6 +389,7 @@
     <div class="navlinks-mobile-hide">
       <a href="#sources">Sources</a>
       <a href="#preview">Preview</a>
+      <a href="#also">More</a>
       <a href="#see">Views</a>
       <a href="#safety">Safety</a>
       <a href="#download" class="cta">Download</a>
@@ -404,7 +406,7 @@
       <div>
         <p class="eyebrow">Sorting by date · v0.0.6</p>
         <h1>The date on the file<br>is not always <em>the date<br>it was made.</em></h1>
-        <p class="lede">eonsort reads <strong>four independent sources</strong> for when a photo or file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. The complete result is shown as a preview before a byte is copied. <strong>Sources are only ever read.</strong></p>
+        <p class="lede">eonsort reads <strong>five independent sources</strong> for when a photo or file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. The complete result is shown as a preview before a byte is copied. <strong>Sources are only ever read.</strong></p>
         <div class="cta-row">
           <a class="btn btn-primary" id="primaryDownload" href="#download">↓ Download for your platform</a>
           <a class="btn btn-ghost" href="https://github.com/it-atelier-gn/eonsort" target="_blank" rel="noopener">View source ↗</a>
@@ -441,7 +443,7 @@
     <div class="wrap">
       <div class="section-head reveal">
         <p class="eyebrow">Where the date comes from</p>
-        <h2>Four sources, cross-checked.</h2>
+        <h2>Five sources, cross-checked.</h2>
         <p>Every source that reports a date is kept, and each one can be switched off. When they disagree, one of three rules decides which date is used.</p>
       </div>
 
@@ -460,6 +462,11 @@
           <div class="tape"></div>
           <div class="src-label"><i class="dot" style="background:var(--c-media)"></i>Media</div>
           <p>The recording time in the <code>mvhd</code> box of MP4, MOV, M4A and related containers.</p>
+        </div>
+        <div class="idx-card reveal">
+          <div class="tape"></div>
+          <div class="src-label"><i class="dot" style="background:var(--c-vision)"></i>Google Takeout</div>
+          <p>The <code>photoTakenTime</code> a Takeout export parks in a JSON sidecar after stripping it out of the file.</p>
         </div>
         <div class="idx-card reveal">
           <div class="tape"></div>
@@ -499,6 +506,7 @@
           <li><span class="flag r">✕</span>A run of files counting up from a reset date while the files themselves were written years later.</li>
           <li><span class="flag a">!</span>A batch of files sharing one timestamp to the second.</li>
           <li><span class="flag a">!</span>A file stranded years from everything else in its folder, or out of step with its camera’s counter.</li>
+          <li><span class="flag a">?</span>A whole number of hours between two sources, which is the shape of a time zone rather than a wrong date, and is reported as such.</li>
         </ul>
       </div>
       <div class="confidence-strip reveal">
@@ -561,6 +569,33 @@
           <img src="screenshot.png" alt="The eonsort desktop app in the Charts view, showing when the files were made, time of day and where each date came from, with a picture and its dates in the preview pane" loading="lazy" />
           <div class="corner br"></div>
           <div class="cap">fig. 1 · choose the folders, scan, review the plan, then copy.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- ALSO -->
+  <section id="also">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Along the way</p>
+        <h2>Three things a date alone will not fix.</h2>
+      </div>
+
+      <div class="rules reveal">
+        <div class="rule active">
+          <div class="name">Files that belong together</div>
+          <div class="desc">A live photo is a picture and a video whose dates rarely agree, and sorting them apart puts one memory in two folders. Groups are dated together, RAW beside JPEG and sidecars included.</div>
+        </div>
+        <div class="rule">
+          <div class="name">Copies of the same picture</div>
+          <div class="desc">Files holding the same bytes are grouped by content, heaviest first, with what the repetition costs. Beneath them, bursts of near-identical frames taken seconds apart.</div>
+        </div>
+        <div class="rule">
+          <div class="name">The date written onto the copy</div>
+          <div class="desc">A copy can carry the date eonsort settled on in its own EXIF block, corrections included, so the next tool to read it does not lose the work. Sources stay untouched.</div>
         </div>
       </div>
     </div>
