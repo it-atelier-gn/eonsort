@@ -316,6 +316,23 @@ mod tests {
         assert!(detect(Path::new("/nowhere/at/all.jpg"), &meta).is_none());
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn spotlight_is_asked_without_taking_the_answer_on_trust() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("dated.jpg");
+        fs::write(&path, crate::exif_write::jpeg_with_exif(64, 32, 1)).unwrap();
+        let meta = fs::metadata(&path).unwrap();
+
+        match detect(&path, &meta) {
+            Some(found) => {
+                assert_eq!(found.provider, super::super::Provider::System);
+                assert_eq!(found.info.as_deref(), Some("kMDItemContentCreationDate"));
+            }
+            None => {}
+        }
+    }
+
     #[test]
     fn a_date_that_only_repeats_the_file_times_is_not_worth_reporting() {
         let dir = tempdir().unwrap();
@@ -332,7 +349,7 @@ mod tests {
         assert!(!echoes_the_file(at(2003, 1, 1, 0, 0, 12), &meta));
     }
 
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(windows)]
     #[test]
     fn a_picture_the_desktop_can_date_is_read_through_it() {
         let dir = tempdir().unwrap();
@@ -342,6 +359,7 @@ mod tests {
 
         let found = detect(&path, &meta).expect("the desktop should date a jpeg carrying EXIF");
         assert_eq!(found.provider, super::super::Provider::System);
+        assert_eq!(found.info.as_deref(), Some("System.Photo.DateTaken"));
         assert_eq!(
             found.taken,
             chrono::NaiveDate::from_ymd_opt(2003, 1, 1)
