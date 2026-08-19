@@ -195,6 +195,17 @@ Turns live in `*.rotations.json` beside the plan, and a copied file refuses to b
 caveat: the small thumbnail inside a photo's own EXIF block is left as it was, so a viewer showing
 that thumbnail may still show it sideways.
 
+## Writing the date onto the copy
+
+Tick **Write the chosen date into the copy** and every JPEG that already carries EXIF dates leaves
+with the date eonsort settled on, corrections included, written into `DateTimeOriginal`,
+`DateTimeDigitized` and `DateTime`. The bytes are patched in place, so the picture is otherwise
+untouched and the file keeps its length; a second copy of the same plan still recognises what it
+already wrote rather than duplicating it. Files with no date tags to overwrite, videos included, are
+copied byte for byte as before.
+
+Sources are never written to. On the command line the flag is `--stamp-date`.
+
 ## Safety
 
 - **Nothing is overwritten.** Same-name files are compared by content; identical ones are left alone, different ones stored beside as `name_dup_1.jpg`.
@@ -258,6 +269,7 @@ it goes, and the plan records relative paths. Naming it on `copy` re-points the 
 | `--strategy oldest` | Earliest date reported. `priority` stops at the first source that reports one. |
 | `--suspect` | On `show`, list only entries whose date looks wrong. |
 | `--auto-rotate` | On `scan`, note sideways pictures so the copy turns them upright. |
+| `--stamp-date` | On `copy`, write the chosen date into the EXIF block of each copy. |
 | `--split-companions` | On `scan`, date each file on its own rather than keeping live photo, RAW and sidecar groups together. |
 | `--jobs 8` | Copy this many files in parallel. |
 | `--hash` | Compare contents during `verify`, not just sizes. |

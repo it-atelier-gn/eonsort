@@ -89,6 +89,9 @@ struct CopyArgs {
     /// Do not carry the source timestamps over to the copies.
     #[arg(long)]
     no_preserve_times: bool,
+    /// Write the date eonsort settled on into the EXIF block of each copy. Sources stay untouched.
+    #[arg(long)]
+    stamp_date: bool,
 }
 
 #[derive(Args)]
@@ -106,6 +109,9 @@ struct SortArgs {
     scan: ScanArgs,
     #[arg(short, long)]
     jobs: Option<usize>,
+    /// Write the date eonsort settled on into the EXIF block of each copy. Sources stay untouched.
+    #[arg(long)]
+    stamp_date: bool,
 }
 
 #[derive(Args)]
@@ -172,7 +178,13 @@ fn main() -> Result<()> {
                 retarget(&args.plan, Some(destination))
                     .context("could not point the plan at that destination")?;
             }
-            run_copy(&args.plan, args.jobs, !args.no_preserve_times, &cancel)?
+            run_copy(
+                &args.plan,
+                args.jobs,
+                !args.no_preserve_times,
+                args.stamp_date,
+                &cancel,
+            )?
         }
         Command::Verify(args) => {
             let report = run_verify(&args.plan, args.hash, &cancel)?;
@@ -183,7 +195,7 @@ fn main() -> Result<()> {
                 anyhow::bail!("sort needs --destination; use scan on its own to plan without one");
             }
             let (plan_path, _) = run_scan(&args.scan, &cancel)?;
-            run_copy(&plan_path, args.jobs, true, &cancel)?;
+            run_copy(&plan_path, args.jobs, true, args.stamp_date, &cancel)?;
         }
         Command::Show(args) => show(&args)?,
     }
@@ -257,11 +269,13 @@ fn run_copy(
     plan_path: &Path,
     jobs: Option<usize>,
     preserve_times: bool,
+    stamp_date: bool,
     cancel: &AtomicBool,
 ) -> Result<()> {
     let options = CopyOptions {
         concurrency: jobs.unwrap_or_else(copy::default_concurrency),
         preserve_times,
+        stamp_date,
     };
 
     let plan = read_plan(plan_path).context("could not read the plan")?;

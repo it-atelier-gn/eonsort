@@ -236,6 +236,7 @@ pub fn start_copy(
     state: State<'_, AppState>,
     jobs: usize,
     preserve_times: bool,
+    stamp_date: bool,
 ) -> Result<(), String> {
     let plan_path = {
         let session = state.session.lock().unwrap();
@@ -254,6 +255,7 @@ pub fn start_copy(
     let options = CopyOptions {
         concurrency: jobs.max(1),
         preserve_times,
+        stamp_date,
     };
     let handle = app.clone();
     std::thread::spawn(move || {

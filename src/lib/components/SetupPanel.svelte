@@ -255,6 +255,19 @@
     <label class="check">
       <input
         type="checkbox"
+        checked={settings.stamp_date}
+        disabled={busy}
+        onchange={(e) => onChange({ ...settings, stamp_date: e.currentTarget.checked })}
+      />
+      <span>Write the chosen date into the copy</span>
+    </label>
+    <p class="faint hint">
+      A JPEG that already carries a date keeps the one eonsort settled on, corrections included, so
+      the sorted copy no longer disagrees with its own folder. Sources are never written to.
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
         checked={settings.pair_companions}
         disabled={busy}
         onchange={(e) => onChange({ ...settings, pair_companions: e.currentTarget.checked })}

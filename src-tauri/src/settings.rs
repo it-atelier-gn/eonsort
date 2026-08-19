@@ -26,6 +26,8 @@ pub struct Settings {
     pub tag_pictures: bool,
     pub jobs: usize,
     pub preserve_times: bool,
+    #[serde(default)]
+    pub stamp_date: bool,
     pub compare_hashes: bool,
     pub last_plan: Option<PathBuf>,
 }
@@ -44,6 +46,7 @@ impl Default for Settings {
             tag_pictures: false,
             jobs: eonsort_core::copy::default_concurrency(),
             preserve_times: true,
+            stamp_date: false,
             compare_hashes: false,
             last_plan: None,
         }

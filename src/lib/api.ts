@@ -16,6 +16,7 @@ export interface Settings {
   tag_pictures: boolean;
   jobs: number;
   preserve_times: boolean;
+  stamp_date: boolean;
   compare_hashes: boolean;
   last_plan: string | null;
 }
@@ -208,8 +209,8 @@ export const checkFolderPattern = (pattern: string) =>
   invoke<void>("check_folder_pattern", { pattern });
 export const cancelJob = () => invoke<void>("cancel_job");
 export const startScan = (request: ScanRequest) => invoke<string>("start_scan", { request });
-export const startCopy = (jobs: number, preserveTimes: boolean) =>
-  invoke<void>("start_copy", { jobs, preserveTimes });
+export const startCopy = (jobs: number, preserveTimes: boolean, stampDate: boolean) =>
+  invoke<void>("start_copy", { jobs, preserveTimes, stampDate });
 export const startVerify = (compareHashes: boolean) =>
   invoke<void>("start_verify", { compareHashes });
 export const openPlan = (path: string) => invoke<PlanSummary>("open_plan", { path });

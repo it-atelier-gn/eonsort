@@ -610,7 +610,8 @@
       });
     });
 
-  const copy = () => run("copy", () => startCopy(settings!.jobs, settings!.preserve_times));
+  const copy = () =>
+    run("copy", () => startCopy(settings!.jobs, settings!.preserve_times, settings!.stamp_date));
   const check = () => run("verify", () => startVerify(settings!.compare_hashes));
 
   async function openInSystem(path: string) {

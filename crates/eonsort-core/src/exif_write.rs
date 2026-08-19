@@ -1,12 +1,17 @@
+use chrono::NaiveDateTime;
 use std::ops::Range;
 
 const EXIF_PREFIX: &[u8] = b"Exif\0\0";
 const TAG_ORIENTATION: u16 = 0x0112;
+const TAG_DATE_TIME: u16 = 0x0132;
+const TAG_DATE_TIME_ORIGINAL: u16 = 0x9003;
+const TAG_DATE_TIME_DIGITIZED: u16 = 0x9004;
+const TYPE_ASCII: u16 = 2;
 const TYPE_SHORT: u16 = 3;
+const DATE_LEN: usize = 20;
 const ENTRY_SIZE: usize = 12;
 const TIFF_MAGIC: u16 = 42;
 
-#[cfg(test)]
 const TAG_EXIF_IFD: u16 = 0x8769;
 #[cfg(test)]
 const TAG_PIXEL_X: u16 = 0xA002;
@@ -36,6 +41,55 @@ pub fn set_orientation(jpeg: &mut [u8], orientation: u16) -> bool {
         return false;
     }
     write_u16(tiff, entry + 8, order, orientation)
+}
+
+pub fn set_taken(jpeg: &mut [u8], taken: NaiveDateTime) -> bool {
+    let Some(range) = exif_range(jpeg) else {
+        return false;
+    };
+    let tiff = &mut jpeg[range];
+    let Some((order, ifd0)) = header(tiff) else {
+        return false;
+    };
+
+    let stamp = format!("{}\0", taken.format("%Y:%m:%d %H:%M:%S"));
+    if stamp.len() != DATE_LEN {
+        return false;
+    }
+
+    let mut targets = vec![(ifd0, TAG_DATE_TIME)];
+    if let Some(sub) = find_entry(tiff, order, ifd0, TAG_EXIF_IFD)
+        .and_then(|entry| read_u32(tiff, entry + 8, order))
+        .map(|at| at as usize)
+    {
+        targets.push((sub, TAG_DATE_TIME_ORIGINAL));
+        targets.push((sub, TAG_DATE_TIME_DIGITIZED));
+    }
+
+    let mut written = false;
+    for (ifd, tag) in targets {
+        written |= write_ascii(tiff, order, ifd, tag, stamp.as_bytes());
+    }
+    written
+}
+
+fn write_ascii(buf: &mut [u8], order: Order, ifd: usize, tag: u16, value: &[u8]) -> bool {
+    let Some(entry) = find_entry(buf, order, ifd, tag) else {
+        return false;
+    };
+    if read_u16(buf, entry + 2, order) != Some(TYPE_ASCII)
+        || read_u32(buf, entry + 4, order) != Some(value.len() as u32)
+    {
+        return false;
+    }
+    let Some(at) = read_u32(buf, entry + 8, order).map(|at| at as usize) else {
+        return false;
+    };
+    let Some(slot) = buf.get_mut(at..at + value.len()) else {
+        return false;
+    };
+    slot.copy_from_slice(value);
+    true
 }
 
 fn exif_range(jpeg: &[u8]) -> Option<Range<usize>> {
@@ -171,7 +225,7 @@ pub(crate) fn jpeg_with_exif(width: u32, height: u32, orientation: u16) -> Vec<u
     tiff.extend_from_slice(&0u32.to_be_bytes());
     tiff.extend_from_slice(b"eonsort\0");
 
-    tiff.extend_from_slice(&2u16.to_be_bytes());
+    tiff.extend_from_slice(&3u16.to_be_bytes());
 
     tiff.extend_from_slice(&TAG_PIXEL_X.to_be_bytes());
     tiff.extend_from_slice(&TYPE_LONG.to_be_bytes());
@@ -183,7 +237,14 @@ pub(crate) fn jpeg_with_exif(width: u32, height: u32, orientation: u16) -> Vec<u
     tiff.extend_from_slice(&1u32.to_be_bytes());
     tiff.extend_from_slice(&height.to_be_bytes());
 
+    let date_at = sub_ifd_at + 2 + 3 * ENTRY_SIZE + 4;
+    tiff.extend_from_slice(&TAG_DATE_TIME_ORIGINAL.to_be_bytes());
+    tiff.extend_from_slice(&TYPE_ASCII.to_be_bytes());
+    tiff.extend_from_slice(&(DATE_LEN as u32).to_be_bytes());
+    tiff.extend_from_slice(&(date_at as u32).to_be_bytes());
+
     tiff.extend_from_slice(&0u32.to_be_bytes());
+    tiff.extend_from_slice(b"2003:01:01 00:00:12\0");
 
     let mut app1 = Vec::new();
     app1.extend_from_slice(EXIF_PREFIX);
@@ -217,6 +278,50 @@ mod tests {
                 .display_value()
                 .to_string(),
         ))
+    }
+
+    fn date_of(jpeg: &[u8]) -> Option<String> {
+        let mut cursor = std::io::Cursor::new(jpeg);
+        let exif = exif::Reader::new().read_from_container(&mut cursor).ok()?;
+        Some(
+            exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY)?
+                .display_value()
+                .to_string(),
+        )
+    }
+
+    fn at(y: i32, m: u32, d: u32, hh: u32, mm: u32, ss: u32) -> NaiveDateTime {
+        chrono::NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(hh, mm, ss)
+            .unwrap()
+    }
+
+    #[test]
+    fn stamping_the_taken_date_leaves_the_file_the_same_length() {
+        let mut jpeg = jpeg_with_exif(64, 32, 1);
+        let before = jpeg.len();
+
+        assert!(set_taken(&mut jpeg, at(2019, 5, 14, 9, 22, 3)));
+
+        assert_eq!(jpeg.len(), before);
+        assert_eq!(date_of(&jpeg).as_deref(), Some("2019-05-14 09:22:03"));
+        assert_eq!(
+            read_back(&jpeg),
+            Some((1, 64, 32, "\"eonsort\"".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_jpeg_without_exif_takes_no_date() {
+        let mut jpeg = plain_jpeg(16, 16);
+        assert!(!set_taken(&mut jpeg, at(2019, 5, 14, 9, 22, 3)));
+    }
+
+    #[test]
+    fn bytes_that_are_not_a_jpeg_take_no_date() {
+        let mut rubbish = b"not a jpeg at all".to_vec();
+        assert!(!set_taken(&mut rubbish, at(2019, 5, 14, 9, 22, 3)));
     }
 
     #[test]

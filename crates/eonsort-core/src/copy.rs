@@ -17,6 +17,7 @@ const MAX_DUPLICATE_ATTEMPTS: usize = 10_000;
 pub struct CopyOptions {
     pub concurrency: usize,
     pub preserve_times: bool,
+    pub stamp_date: bool,
 }
 
 impl Default for CopyOptions {
@@ -24,6 +25,7 @@ impl Default for CopyOptions {
         Self {
             concurrency: default_concurrency(),
             preserve_times: true,
+            stamp_date: false,
         }
     }
 }
@@ -336,7 +338,7 @@ fn transfer(
     ));
 
     let mut refused = false;
-    let turned = if entry.rotate.is_identity() {
+    let mut turned = if entry.rotate.is_identity() {
         None
     } else {
         match rotate::write_rotated(&entry.source, &temp, entry.rotate, entry.reencode) {
@@ -348,6 +350,32 @@ fn transfer(
             Err(e) => return Err(e),
         }
     };
+
+    if options.stamp_date {
+        if turned.is_none() && rotate::lossless_extension(&entry.source) {
+            fs::copy(&entry.source, &temp).map_err(|e| Error::io(&entry.source, e))?;
+            turned = Some(Written {
+                size: source_meta.len(),
+                hash: String::new(),
+            });
+        }
+        if turned.is_some() {
+            match stamp(&temp, entry.taken) {
+                Ok(true) => {
+                    turned = Some(Written {
+                        size: fs::metadata(&temp).map_err(|e| Error::io(&temp, e))?.len(),
+                        hash: hash_file(&temp)?,
+                    })
+                }
+                Ok(false) if entry.rotate.is_identity() => {
+                    let _ = fs::remove_file(&temp);
+                    turned = None;
+                }
+                Ok(_) => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
 
     let name_lock = state.lock_for(&entry.destination);
     let _guard = name_lock.lock().unwrap();
@@ -442,6 +470,15 @@ fn resolve(
     }
 
     Err(Error::DestinationExhausted(entry.destination.clone()))
+}
+
+fn stamp(path: &Path, taken: chrono::NaiveDateTime) -> Result<bool> {
+    let mut bytes = fs::read(path).map_err(|e| Error::io(path, e))?;
+    if !crate::exif_write::set_taken(&mut bytes, taken) {
+        return Ok(false);
+    }
+    fs::write(path, &bytes).map_err(|e| Error::io(path, e))?;
+    Ok(true)
 }
 
 fn hash_file(path: &Path) -> Result<String> {
@@ -571,6 +608,71 @@ mod tests {
             )
             .unwrap()
         }
+
+        fn run_stamping(&self) -> CopyReport {
+            let options = CopyOptions {
+                stamp_date: true,
+                ..CopyOptions::default()
+            };
+            execute(&self.plan, &options, &AtomicBool::new(false), &|_| {}).unwrap()
+        }
+    }
+
+    fn date_of(path: &Path) -> Option<String> {
+        let file = File::open(path).ok()?;
+        let mut reader = std::io::BufReader::new(file);
+        let exif = ::exif::Reader::new()
+            .read_from_container(&mut reader)
+            .ok()?;
+        Some(
+            exif.get_field(::exif::Tag::DateTimeOriginal, ::exif::In::PRIMARY)?
+                .display_value()
+                .to_string(),
+        )
+    }
+
+    #[test]
+    fn stamps_the_chosen_date_into_the_copy_and_leaves_the_source_alone() {
+        let picture = crate::exif_write::jpeg_with_exif(64, 32, 1);
+        let fixture = Fixture::new(&[("IMG_20190514_092203.jpg", &picture)]);
+
+        let report = fixture.run_stamping();
+        assert_eq!(report.progress.copied, 1);
+
+        let landed = fixture.landed().pop().unwrap();
+        assert_eq!(date_of(&landed).as_deref(), Some("2019-05-14 09:22:03"));
+
+        let source = fixture
+            .dir
+            .path()
+            .join("src")
+            .join("IMG_20190514_092203.jpg");
+        assert_eq!(fs::read(&source).unwrap(), picture);
+    }
+
+    #[test]
+    fn a_stamped_copy_is_recognised_rather_than_duplicated_on_a_second_run() {
+        let picture = crate::exif_write::jpeg_with_exif(64, 32, 1);
+        let fixture = Fixture::new(&[("IMG_20190514_092203.jpg", &picture)]);
+
+        fixture.run_stamping();
+        fs::remove_file(journal_path(&fixture.plan)).unwrap();
+        let second = fixture.run_stamping();
+
+        assert_eq!(second.progress.already_present, 1);
+        assert_eq!(second.progress.copied, 0);
+        assert_eq!(fixture.landed().len(), 1);
+    }
+
+    #[test]
+    fn a_file_that_cannot_carry_a_date_is_copied_byte_for_byte() {
+        let fixture = Fixture::new(&[("VID_20190514_092203.mp4", b"clip")]);
+
+        let report = fixture.run_stamping();
+
+        assert_eq!(report.progress.copied, 1);
+        let landed = fixture.landed().pop().unwrap();
+        assert_eq!(fs::read(&landed).unwrap(), b"clip");
     }
 
     #[test]
