@@ -10,6 +10,7 @@ pub const RUN_GAP_DAYS: i64 = 30;
 pub const SPREAD_DAYS: i64 = 180;
 pub const WRITE_TOLERANCE_HOURS: i64 = 48;
 pub const CONSENSUS_HOURS: i64 = 24;
+pub const MAX_ZONE_HOURS: i64 = 14;
 pub const NEIGHBOUR_DRIFT_DAYS: i64 = 730;
 pub const IDENTICAL_CLUSTER_MIN: usize = 5;
 pub const SEQUENCE_MIN: usize = 5;
@@ -26,18 +27,21 @@ pub enum Flag {
     IdenticalTimestampCluster { files: usize },
     SequenceOutlier,
     FarFromNeighbours { years: i64 },
+    TimezoneShift { hours: i64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Hard,
     Soft,
+    Note,
 }
 
 impl Flag {
     pub fn severity(&self) -> Severity {
         match self {
             Flag::ProviderSpread { .. } => Severity::Soft,
+            Flag::TimezoneShift { .. } => Severity::Note,
             _ => Severity::Hard,
         }
     }
@@ -59,6 +63,9 @@ impl Flag {
             Flag::FarFromNeighbours { years } => {
                 format!("{years} years away from the rest of its folder")
             }
+            Flag::TimezoneShift { hours } => format!(
+                "reads {hours} whole hours from another source, which is the shape of a time zone rather than a wrong date"
+            ),
         }
     }
 }
@@ -135,14 +142,30 @@ pub fn entry_flags(
 ) -> Vec<Flag> {
     let mut flags = date_flags(chosen, filesystem_latest, now);
     flags.extend(spread(candidates));
+    flags.extend(timezone_shift(chosen, candidates));
     flags
+}
+
+pub fn timezone_shift(chosen: NaiveDateTime, candidates: &[Detection]) -> Option<Flag> {
+    candidates
+        .iter()
+        .filter(|c| c.provider != Provider::Filesystem)
+        .filter_map(|c| {
+            let apart = chosen - c.taken;
+            let hours = apart.num_hours();
+            (hours != 0
+                && hours.abs() <= MAX_ZONE_HOURS
+                && apart == chrono::TimeDelta::hours(hours))
+            .then_some(Flag::TimezoneShift { hours: hours.abs() })
+        })
+        .next()
 }
 
 pub fn confidence(candidates: &[Detection], flags: &[Flag]) -> Confidence {
     if flags.iter().any(|f| f.severity() == Severity::Hard) {
         return Confidence::Low;
     }
-    if flags.is_empty() && corroborated(candidates) {
+    if flags.iter().all(|f| f.severity() == Severity::Note) && corroborated(candidates) {
         return Confidence::High;
     }
     Confidence::Medium
@@ -322,6 +345,65 @@ mod tests {
             info: None,
             taken,
         }
+    }
+
+    #[test]
+    fn a_whole_hour_apart_reads_as_a_time_zone_rather_than_a_wrong_date() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Media, at(2019, 5, 14, 7, 22, 3)),
+        ];
+
+        let flag = timezone_shift(at(2019, 5, 14, 9, 22, 3), &candidates).unwrap();
+        assert_eq!(flag, Flag::TimezoneShift { hours: 2 });
+        assert_eq!(flag.severity(), Severity::Note);
+    }
+
+    #[test]
+    fn a_time_zone_note_still_leaves_the_date_trusted() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Media, at(2019, 5, 14, 7, 22, 3)),
+        ];
+        let flags = entry_flags(
+            at(2019, 5, 14, 9, 22, 3),
+            &candidates,
+            Some(at(2019, 5, 15, 0, 0, 0)),
+            at(2026, 1, 1, 0, 0, 0),
+        );
+
+        assert_eq!(flags, vec![Flag::TimezoneShift { hours: 2 }]);
+        assert_eq!(confidence(&candidates, &flags), Confidence::High);
+    }
+
+    #[test]
+    fn a_ragged_difference_is_not_a_time_zone() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Media, at(2019, 5, 14, 7, 52, 3)),
+        ];
+
+        assert!(timezone_shift(at(2019, 5, 14, 9, 22, 3), &candidates).is_none());
+    }
+
+    #[test]
+    fn the_file_system_time_is_never_read_as_a_time_zone() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Filesystem, at(2019, 5, 14, 6, 22, 3)),
+        ];
+
+        assert!(timezone_shift(at(2019, 5, 14, 9, 22, 3), &candidates).is_none());
+    }
+
+    #[test]
+    fn a_gap_wider_than_any_time_zone_is_left_alone() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Media, at(2019, 5, 13, 9, 22, 3)),
+        ];
+
+        assert!(timezone_shift(at(2019, 5, 14, 9, 22, 3), &candidates).is_none());
     }
 
     #[test]

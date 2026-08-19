@@ -1377,6 +1377,7 @@ fn flag_kind(flag: &Flag) -> &'static str {
         Flag::IdenticalTimestampCluster { .. } => "identical_timestamp_cluster",
         Flag::SequenceOutlier => "sequence_outlier",
         Flag::FarFromNeighbours { .. } => "far_from_neighbours",
+        Flag::TimezoneShift { .. } => "timezone_shift",
     }
 }
 

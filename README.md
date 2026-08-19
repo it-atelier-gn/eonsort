@@ -33,7 +33,7 @@ Windows, Linux and macOS — desktop app and `eonsort` command line tool.
 |---|---|
 | **File name** | `IMG_20230506_101112.jpg`, `Screenshot 2021-07-04 at 09.05.01.png`, `Rechnung 06.05.2021.pdf`, and many more shapes |
 | **EXIF** | `DateTimeOriginal` and friends in JPEG, TIFF, PNG, WebP, HEIF and common raw formats |
-| **Media** | Recording time in the `mvhd` box of MP4, MOV, M4A and related containers |
+| **Media** | `com.apple.quicktime.creationdate` where a phone wrote one, otherwise the `mvhd` box of MP4, MOV, M4A and related containers |
 | **Google Takeout** | `photoTakenTime` in the JSON sidecar a Google Photos export leaves beside each file |
 | **File system** | Whichever of created / modified is older |
 
@@ -99,6 +99,13 @@ quietly misfiles:
 - a run of files counting up from a reset date while the files were written years later
 - a batch sharing one timestamp to the second
 - a file stranded years from everything else in its folder, or out of step with its camera's counter
+
+A whole number of hours between two sources is reported as a note rather than a fault: that is the
+shape of a time zone, not of a wrong date. Videos are the usual cause, because `mvhd` records UTC
+with no zone at all. Where a phone also wrote `com.apple.quicktime.creationdate`, eonsort takes that
+instead, so a clip filmed abroad keeps the wall clock time it was filmed at rather than being shifted
+into the zone of the machine doing the sorting. Photos carry the same information in
+`OffsetTimeOriginal`, which is shown beside the date it came from.
 
 Flagged files appear under **Issues**; clicking a group selects them. In the preview pane you can
 take the date from another source, type one in, or anchor one file to its true date and shift the

@@ -10,10 +10,18 @@ const EXTENSIONS: &[&str] = &[
     "cr2", "cr3", "nef", "nrw", "arw", "sr2", "srf", "orf", "rw2", "raf", "pef", "3fr",
 ];
 
-const TAGS: &[(Tag, &str)] = &[
-    (Tag::DateTimeOriginal, "DateTimeOriginal"),
-    (Tag::DateTimeDigitized, "DateTimeDigitized"),
-    (Tag::DateTime, "DateTime"),
+const TAGS: &[(Tag, &str, Tag)] = &[
+    (
+        Tag::DateTimeOriginal,
+        "DateTimeOriginal",
+        Tag::OffsetTimeOriginal,
+    ),
+    (
+        Tag::DateTimeDigitized,
+        "DateTimeDigitized",
+        Tag::OffsetTimeDigitized,
+    ),
+    (Tag::DateTime, "DateTime", Tag::OffsetTime),
 ];
 
 pub fn detect(path: &Path) -> Option<Detection> {
@@ -25,15 +33,28 @@ pub fn detect(path: &Path) -> Option<Detection> {
     let mut reader = BufReader::new(File::open(path).ok()?);
     let exif = Reader::new().read_from_container(&mut reader).ok()?;
 
-    TAGS.iter().find_map(|(tag, name)| {
+    TAGS.iter().find_map(|(tag, name, offset_tag)| {
         let field = exif.get_field(*tag, In::PRIMARY)?;
         let taken = parse_date(&field.display_value().to_string())?;
+        let zone = offset(&exif, *offset_tag);
         Some(Detection {
             provider: Provider::Exif,
-            info: Some((*name).to_string()),
+            info: Some(match zone {
+                Some(zone) => format!("{name} {zone}"),
+                None => (*name).to_string(),
+            }),
             taken,
         })
     })
+}
+
+fn offset(exif: &::exif::Exif, tag: Tag) -> Option<String> {
+    let raw = exif
+        .get_field(tag, In::PRIMARY)?
+        .display_value()
+        .to_string();
+    let zone = raw.trim().trim_matches('"').to_string();
+    zone.starts_with(['+', '-']).then_some(zone)
 }
 
 #[cfg(test)]
