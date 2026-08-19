@@ -27,9 +27,9 @@
     { id: "xmp", label: "XMP sidecar", hint: "The .xmp a raw developer writes beside a picture" },
     { id: "takeout", label: "Google Takeout", hint: "The JSON sidecar an export leaves behind" },
     {
-      id: "windows",
-      label: "Windows properties",
-      hint: "Windows only, and only for files nothing else could date",
+      id: "system",
+      label: "System properties",
+      hint: "Windows Details and macOS Spotlight, for files nothing else could date",
     },
     { id: "filesystem", label: "File system", hint: "Created / modified time" },
   ];

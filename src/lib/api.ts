@@ -6,7 +6,7 @@ export type Provider =
   | "media"
   | "xmp"
   | "takeout"
-  | "windows"
+  | "system"
   | "filesystem";
 export type Strategy = "smart" | "oldest" | "priority";
 export type Confidence = "high" | "medium" | "low";

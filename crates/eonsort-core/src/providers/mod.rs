@@ -2,8 +2,8 @@ mod exif;
 mod filename;
 mod filesystem;
 mod media;
+pub mod system;
 pub mod takeout;
-pub mod windows;
 pub mod xmp;
 
 use crate::suspect::{self, Flag};
@@ -23,7 +23,7 @@ pub enum Provider {
     Media,
     Xmp,
     Takeout,
-    Windows,
+    System,
     Filesystem,
 }
 
@@ -34,7 +34,7 @@ impl Provider {
         Provider::Media,
         Provider::Xmp,
         Provider::Takeout,
-        Provider::Windows,
+        Provider::System,
         Provider::Filesystem,
     ];
 
@@ -44,7 +44,7 @@ impl Provider {
         Provider::Media,
         Provider::Xmp,
         Provider::Takeout,
-        Provider::Windows,
+        Provider::System,
         Provider::Filesystem,
     ];
 
@@ -55,7 +55,7 @@ impl Provider {
             Provider::Media => "media",
             Provider::Xmp => "xmp",
             Provider::Takeout => "takeout",
-            Provider::Windows => "windows",
+            Provider::System => "system",
             Provider::Filesystem => "filesystem",
         }
     }
@@ -65,7 +65,7 @@ impl Provider {
             Provider::Xmp => 42,
             Provider::Exif | Provider::Media => 40,
             Provider::Takeout => 38,
-            Provider::Windows => 36,
+            Provider::System => 36,
             Provider::Filename => 30,
             Provider::Filesystem => 10,
         }
@@ -137,12 +137,12 @@ pub struct Resolved {
 pub fn detect_all(path: &Path, meta: &Metadata, providers: &[Provider]) -> Vec<Detection> {
     let mut found: Vec<Detection> = providers
         .iter()
-        .filter(|p| **p != Provider::Windows)
+        .filter(|p| **p != Provider::System)
         .filter_map(|p| run(*p, path, meta))
         .collect();
 
-    if providers.contains(&Provider::Windows) && !dated_by_content(&found) {
-        found.extend(run(Provider::Windows, path, meta));
+    if providers.contains(&Provider::System) && !dated_by_content(&found) {
+        found.extend(run(Provider::System, path, meta));
     }
 
     found.sort_by_key(|d| d.provider);
@@ -153,7 +153,7 @@ pub fn detect_all(path: &Path, meta: &Metadata, providers: &[Provider]) -> Vec<D
 fn dated_by_content(found: &[Detection]) -> bool {
     found
         .iter()
-        .any(|d| !matches!(d.provider, Provider::Filesystem | Provider::Windows))
+        .any(|d| !matches!(d.provider, Provider::Filesystem | Provider::System))
 }
 
 pub fn choose(
@@ -225,7 +225,7 @@ fn run(provider: Provider, path: &Path, meta: &Metadata) -> Option<Detection> {
         Provider::Media => media::detect(path),
         Provider::Xmp => xmp::detect(path),
         Provider::Takeout => takeout::detect(path),
-        Provider::Windows => windows::detect(path),
+        Provider::System => system::detect(path),
         Provider::Filesystem => filesystem::detect(meta),
     }
 }
@@ -299,7 +299,7 @@ mod tests {
             let meta = fs::metadata(path).unwrap();
             detect_all(path, &meta, &Provider::ALL)
                 .iter()
-                .any(|d| d.provider == Provider::Windows)
+                .any(|d| d.provider == Provider::System)
         };
 
         assert!(!asked(&named));
