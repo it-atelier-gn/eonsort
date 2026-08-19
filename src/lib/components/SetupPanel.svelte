@@ -208,21 +208,10 @@
   </section>
 
   <section>
-    <label for="jobs">Copy settings</label>
-    <div class="row">
-      <input
-        id="jobs"
-        type="number"
-        min="1"
-        max="32"
-        value={settings.jobs}
-        disabled={busy}
-        oninput={(e) => onChange({ ...settings, jobs: Number(e.currentTarget.value) || 1 })}
-      />
-      <span class="faint nowrap">parallel copies</span>
-    </div>
+    <label for="copy-settings">Copy settings</label>
     <label class="check">
       <input
+        id="copy-settings"
         type="checkbox"
         checked={settings.preserve_times}
         disabled={busy}
@@ -444,8 +433,4 @@
     color: var(--danger);
   }
 
-  .nowrap {
-    white-space: nowrap;
-    font-size: 12px;
-  }
 </style>

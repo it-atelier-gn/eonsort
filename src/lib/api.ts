@@ -14,7 +14,6 @@ export interface Settings {
   auto_rotate: boolean;
   pair_companions: boolean;
   tag_pictures: boolean;
-  jobs: number;
   preserve_times: boolean;
   stamp_date: boolean;
   compare_hashes: boolean;
@@ -230,8 +229,8 @@ export const checkFolderPattern = (pattern: string) =>
   invoke<void>("check_folder_pattern", { pattern });
 export const cancelJob = () => invoke<void>("cancel_job");
 export const startScan = (request: ScanRequest) => invoke<string>("start_scan", { request });
-export const startCopy = (jobs: number, preserveTimes: boolean, stampDate: boolean) =>
-  invoke<void>("start_copy", { jobs, preserveTimes, stampDate });
+export const startCopy = (preserveTimes: boolean, stampDate: boolean) =>
+  invoke<void>("start_copy", { preserveTimes, stampDate });
 export const findDuplicates = () => invoke<DuplicateReport>("find_duplicates");
 
 export const findBursts = () => invoke<BurstView[]>("find_bursts");

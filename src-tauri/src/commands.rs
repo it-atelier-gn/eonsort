@@ -234,7 +234,6 @@ pub fn start_scan(
 pub fn start_copy(
     app: AppHandle,
     state: State<'_, AppState>,
-    jobs: usize,
     preserve_times: bool,
     stamp_date: bool,
 ) -> Result<(), String> {
@@ -253,7 +252,7 @@ pub fn start_copy(
     state.begin("A copy")?;
 
     let options = CopyOptions {
-        concurrency: jobs.max(1),
+        concurrency: None,
         preserve_times,
         stamp_date,
     };

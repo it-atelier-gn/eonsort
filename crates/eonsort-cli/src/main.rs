@@ -83,7 +83,8 @@ struct CopyArgs {
     /// re-points the plan at a different destination.
     #[arg(short, long)]
     destination: Option<PathBuf>,
-    /// Number of files to copy in parallel.
+    /// Number of files to copy in parallel. Left out, eonsort picks one from the size of the
+    /// files it is about to copy.
     #[arg(short, long)]
     jobs: Option<usize>,
     /// Do not carry the source timestamps over to the copies.
@@ -273,7 +274,7 @@ fn run_copy(
     cancel: &AtomicBool,
 ) -> Result<()> {
     let options = CopyOptions {
-        concurrency: jobs.unwrap_or_else(copy::default_concurrency),
+        concurrency: jobs,
         preserve_times,
         stamp_date,
     };

@@ -24,7 +24,6 @@ pub struct Settings {
     pub pair_companions: bool,
     #[serde(default)]
     pub tag_pictures: bool,
-    pub jobs: usize,
     pub preserve_times: bool,
     #[serde(default)]
     pub stamp_date: bool,
@@ -44,7 +43,6 @@ impl Default for Settings {
             auto_rotate: false,
             pair_companions: true,
             tag_pictures: false,
-            jobs: eonsort_core::copy::default_concurrency(),
             preserve_times: true,
             stamp_date: false,
             compare_hashes: false,

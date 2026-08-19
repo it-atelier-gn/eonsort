@@ -15,7 +15,7 @@ const MAX_DUPLICATE_ATTEMPTS: usize = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CopyOptions {
-    pub concurrency: usize,
+    pub concurrency: Option<usize>,
     pub preserve_times: bool,
     pub stamp_date: bool,
 }
@@ -23,17 +23,37 @@ pub struct CopyOptions {
 impl Default for CopyOptions {
     fn default() -> Self {
         Self {
-            concurrency: default_concurrency(),
+            concurrency: None,
             preserve_times: true,
             stamp_date: false,
         }
     }
 }
 
-pub fn default_concurrency() -> usize {
+const SMALL_FILE_BYTES: u64 = 256 * 1024;
+const LARGE_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
+pub fn cores() -> usize {
     std::thread::available_parallelism()
-        .map(|n| n.get().clamp(1, 8))
+        .map(|n| n.get())
         .unwrap_or(4)
+}
+
+pub fn tuned_concurrency(files: u64, bytes: u64) -> usize {
+    let cores = cores();
+    if files == 0 {
+        return cores.clamp(2, 8);
+    }
+
+    let average = bytes / files;
+    let workers = if average >= LARGE_FILE_BYTES {
+        cores.min(4)
+    } else if average <= SMALL_FILE_BYTES {
+        (cores * 2).min(16)
+    } else {
+        cores.min(8)
+    };
+    workers.max(2)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,8 +195,15 @@ pub fn execute(
         temp_counter: AtomicU64::new(0),
     };
 
+    let workers = options.concurrency.map(|n| n.max(1)).unwrap_or_else(|| {
+        tuned_concurrency(
+            pending.len() as u64,
+            pending.iter().map(|entry| entry.size).sum(),
+        )
+    });
+
     let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(options.concurrency.max(1))
+        .num_threads(workers)
         .build()
         .map_err(|e| Error::ThreadPool(e.to_string()))?;
 
@@ -629,6 +656,43 @@ mod tests {
                 .display_value()
                 .to_string(),
         )
+    }
+
+    #[test]
+    fn few_workers_for_big_files_and_many_for_small_ones() {
+        let cores = cores();
+        let big = tuned_concurrency(100, 100 * 64 * 1024 * 1024);
+        let small = tuned_concurrency(100_000, 100_000 * 32 * 1024);
+        let middling = tuned_concurrency(1_000, 1_000 * 4 * 1024 * 1024);
+
+        assert_eq!(big, cores.clamp(2, 4));
+        assert_eq!(small, (cores * 2).clamp(2, 16));
+        assert_eq!(middling, cores.clamp(2, 8));
+        assert!(big <= middling && middling <= small);
+    }
+
+    #[test]
+    fn an_empty_plan_still_asks_for_a_workable_number_of_workers() {
+        assert!(tuned_concurrency(0, 0) >= 2);
+    }
+
+    #[test]
+    fn a_copy_left_to_choose_for_itself_still_moves_every_file() {
+        let fixture = Fixture::new(&[
+            ("IMG_20230506_101112.jpg", b"one"),
+            ("VID_20191102_080910.mp4", b"two"),
+        ]);
+
+        let report = execute(
+            &fixture.plan,
+            &CopyOptions::default(),
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .unwrap();
+
+        assert_eq!(report.progress.copied, 2);
+        assert_eq!(fixture.landed().len(), 2);
     }
 
     #[test]

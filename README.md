@@ -217,6 +217,13 @@ copied byte for byte as before.
 
 Sources are never written to. On the command line the flag is `--stamp-date`.
 
+## How many files at once
+
+The copy no longer asks. It looks at what it is about to move and picks the number of parallel
+copies from the average file size: a few workers for large files, where one stream already saturates
+the disk, and more for a mass of small ones, where the cost is per file rather than per byte. The
+`--jobs` flag still overrides it on the command line.
+
 ## Safety
 
 - **Nothing is overwritten.** Same-name files are compared by content; identical ones are left alone, different ones stored beside as `name_dup_1.jpg`.
@@ -282,7 +289,7 @@ it goes, and the plan records relative paths. Naming it on `copy` re-points the 
 | `--auto-rotate` | On `scan`, note sideways pictures so the copy turns them upright. |
 | `--stamp-date` | On `copy`, write the chosen date into the EXIF block of each copy. |
 | `--split-companions` | On `scan`, date each file on its own rather than keeping live photo, RAW and sidecar groups together. |
-| `--jobs 8` | Copy this many files in parallel. |
+| `--jobs 8` | Copy this many files in parallel. Left out, eonsort picks a number from the size of the files it is about to copy. |
 | `--hash` | Compare contents during `verify`, not just sizes. |
 
 Ctrl-C at any time; run the same command again to continue.
