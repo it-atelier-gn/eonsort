@@ -363,13 +363,18 @@
   .terminal .p{ color:var(--cyan); }
 
   /* footer */
-  footer{ padding:64px 0 50px; border-top:1px solid var(--border-soft); position:relative; z-index:1; }
-  .foot-grid{ display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:30px; }
-  .foot-brand{ font-family:var(--mono); font-size:13px; color:var(--ink-faint); }
-  .foot-brand b{ color:var(--ink); }
-  .foot-links{ display:flex; gap:24px; font-family:var(--mono); font-size:13px; }
-  .foot-links a{ text-decoration:none; color:var(--ink-dim); }
-  .foot-links a:hover{ color:var(--cyan); }
+  footer{
+    border-top:1px solid var(--border-soft);
+    padding:2rem;
+    text-align:center;
+    color:var(--ink-faint);
+    font-family:var(--mono);
+    font-size:0.85rem;
+    position:relative; z-index:1;
+  }
+  footer a{ color:var(--cyan); text-decoration:none; }
+  footer a:hover{ text-decoration:underline; }
+  .footer-inner{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; max-width:1100px; margin:0 auto; }
 </style>
 </head>
 <body>
@@ -715,16 +720,13 @@
 </main>
 
 <footer>
-  <div class="wrap foot-grid">
-    <div>
-      <div class="foot-brand"><b>eonsort</b> · sort files by the date they were actually made.</div>
-    </div>
-    <div class="foot-links">
-      <a href="https://github.com/it-atelier-gn/eonsort" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://github.com/it-atelier-gn/eonsort/releases" target="_blank" rel="noopener">Releases</a>
-      <a href="https://github.com/it-atelier-gn/eonsort/issues" target="_blank" rel="noopener">Issues</a>
-      <a href="https://github.com/it-atelier-gn/eonsort/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
-    </div>
+  <div class="footer-inner">
+    <span>© 2026 Georg Nelles · MIT License</span>
+    <span>
+      <a href="https://github.com/it-atelier-gn/eonsort">GitHub</a> ·
+      <a href="https://github.com/it-atelier-gn/eonsort/releases">Releases</a> ·
+      <a href="https://github.com/it-atelier-gn/eonsort/issues">Issues</a>
+    </span>
   </div>
 </footer>
 
