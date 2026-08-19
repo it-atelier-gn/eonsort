@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
+fn yes() -> bool {
+    true
+}
+
 const FILE_NAME: &str = "settings.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,6 +20,8 @@ pub struct Settings {
     pub strategy: Strategy,
     pub follow_symlinks: bool,
     pub auto_rotate: bool,
+    #[serde(default = "yes")]
+    pub pair_companions: bool,
     #[serde(default)]
     pub tag_pictures: bool,
     pub jobs: usize,
@@ -34,6 +40,7 @@ impl Default for Settings {
             strategy: Strategy::default(),
             follow_symlinks: false,
             auto_rotate: false,
+            pair_companions: true,
             tag_pictures: false,
             jobs: eonsort_core::copy::default_concurrency(),
             preserve_times: true,

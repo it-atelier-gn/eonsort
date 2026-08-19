@@ -1,3 +1,4 @@
+pub mod companion;
 pub mod copy;
 pub mod dateparse;
 pub mod error;

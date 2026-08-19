@@ -12,6 +12,7 @@ export interface Settings {
   strategy: Strategy;
   follow_symlinks: boolean;
   auto_rotate: boolean;
+  pair_companions: boolean;
   tag_pictures: boolean;
   jobs: number;
   preserve_times: boolean;
@@ -27,6 +28,7 @@ export interface ScanRequest {
   strategy: Strategy;
   follow_symlinks: boolean;
   auto_rotate: boolean;
+  pair_companions: boolean;
 }
 
 export interface PlanSummary {

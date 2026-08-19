@@ -255,6 +255,20 @@
     <label class="check">
       <input
         type="checkbox"
+        checked={settings.pair_companions}
+        disabled={busy}
+        onchange={(e) => onChange({ ...settings, pair_companions: e.currentTarget.checked })}
+      />
+      <span>Keep files that belong together on one date</span>
+    </label>
+    <p class="faint hint">
+      A live photo's video, a RAW beside its JPEG, and <code>.xmp</code>, <code>.aae</code> or
+      Takeout <code>.json</code> sidecars take the date of the picture they belong to, so a pair is
+      never split across two folders.
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
         checked={settings.tag_pictures}
         disabled={busy}
         onchange={(e) => onChange({ ...settings, tag_pictures: e.currentTarget.checked })}

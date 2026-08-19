@@ -41,6 +41,8 @@ pub struct ScanRequest {
     #[serde(default)]
     pub auto_rotate: bool,
     #[serde(default)]
+    pub pair_companions: bool,
+    #[serde(default)]
     pub upright: bool,
 }
 
@@ -188,6 +190,7 @@ pub fn start_scan(
         },
         follow_symlinks: request.follow_symlinks,
         auto_rotate: request.auto_rotate,
+        pair_companions: request.pair_companions,
         upright_model_dir: request
             .upright
             .then(|| models_directory(&app))

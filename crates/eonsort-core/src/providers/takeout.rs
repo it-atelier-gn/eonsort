@@ -178,7 +178,9 @@ mod tests {
         fs::write(dir.path().join("IMG_1234.JPG.json"), body(TAKEN)).unwrap();
 
         assert_eq!(
-            detect(&dir.path().join("IMG_1234-edited.JPG")).unwrap().taken,
+            detect(&dir.path().join("IMG_1234-edited.JPG"))
+                .unwrap()
+                .taken,
             expected(TAKEN)
         );
     }

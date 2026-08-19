@@ -61,6 +61,13 @@ pub fn retarget(plan_path: &Path, destination: Option<&Path>) -> Result<Plan> {
         )?;
     }
 
+    rewrite(plan_path, &plan)?;
+    let _ = std::fs::remove_file(crate::copy::journal_path(plan_path));
+
+    Ok(plan)
+}
+
+pub fn rewrite(plan_path: &Path, plan: &Plan) -> Result<()> {
     let temp = plan_path.with_extension("jsonl.rewrite");
     let mut writer = PlanWriter::create(&temp, &plan.header)?;
     for entry in &plan.entries {
@@ -71,10 +78,7 @@ pub fn retarget(plan_path: &Path, destination: Option<&Path>) -> Result<Plan> {
     }
     writer.flush()?;
     drop(writer);
-    std::fs::rename(&temp, plan_path).map_err(|e| Error::io(plan_path, e))?;
-    let _ = std::fs::remove_file(crate::copy::journal_path(plan_path));
-
-    Ok(plan)
+    std::fs::rename(&temp, plan_path).map_err(|e| Error::io(plan_path, e))
 }
 
 pub fn read_plan(path: &Path) -> Result<Plan> {

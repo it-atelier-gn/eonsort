@@ -606,6 +606,7 @@
         strategy: settings!.strategy,
         follow_symlinks: settings!.follow_symlinks,
         auto_rotate: settings!.auto_rotate,
+        pair_companions: settings!.pair_companions,
       });
     });
 

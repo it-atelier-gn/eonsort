@@ -65,6 +65,10 @@ struct ScanArgs {
     /// Turn sideways pictures upright when copying, using the orientation their metadata records.
     #[arg(long)]
     auto_rotate: bool,
+    /// Date files that belong together separately, rather than on the date of the picture they
+    /// belong to.
+    #[arg(long)]
+    split_companions: bool,
     /// Folder holding the upright model weights. Given one, pictures whose metadata says nothing
     /// about their orientation are looked at to work out which way is up.
     #[arg(long)]
@@ -211,6 +215,7 @@ fn run_scan(args: &ScanArgs, cancel: &AtomicBool) -> Result<(PathBuf, u64)> {
         },
         follow_symlinks: args.follow_symlinks,
         auto_rotate: args.auto_rotate,
+        pair_companions: !args.split_companions,
         upright_model_dir: args.upright_models.clone(),
     };
 

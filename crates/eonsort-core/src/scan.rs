@@ -1,3 +1,4 @@
+use crate::companion;
 use crate::error::{Error, Result};
 use crate::model::{
     destination_root, destination_with_subject, validate_folder_pattern, PlanEntry, PlanHeader,
@@ -28,8 +29,14 @@ pub struct ScanOptions {
     pub follow_symlinks: bool,
     #[serde(default)]
     pub auto_rotate: bool,
+    #[serde(default = "yes")]
+    pub pair_companions: bool,
     #[serde(default)]
     pub upright_model_dir: Option<PathBuf>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 struct Models<'a> {
@@ -124,7 +131,16 @@ pub fn scan(
         current: None,
     });
 
-    read_plan(plan_path)
+    let mut plan = read_plan(plan_path)?;
+    if options.pair_companions {
+        let root = plan.header.root().to_path_buf();
+        let pattern = plan.header.folder_pattern.clone();
+        if companion::pair(&mut plan.entries, &root, &pattern)? > 0 {
+            crate::plan::rewrite(plan_path, &plan)?;
+        }
+    }
+
+    Ok(plan)
 }
 
 fn resumable(plan_path: &Path, header: &PlanHeader) -> Option<Plan> {
@@ -309,11 +325,85 @@ mod tests {
             detect: DetectOptions::default(),
             follow_symlinks: false,
             auto_rotate: false,
+            pair_companions: false,
             upright_model_dir: None,
         }
     }
 
     fn noop(_: ScanProgress) {}
+
+    #[test]
+    fn a_companion_takes_the_date_of_the_picture_it_belongs_to() {
+        use filetime::{set_file_mtime, FileTime};
+
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("IMG_1234.jpg"), b"picture").unwrap();
+        fs::write(src.join("IMG_1234.mov"), b"clip").unwrap();
+        set_file_mtime(
+            src.join("IMG_1234.jpg"),
+            FileTime::from_unix_time(1_557_818_523, 0),
+        )
+        .unwrap();
+        set_file_mtime(
+            src.join("IMG_1234.mov"),
+            FileTime::from_unix_time(1_672_531_200, 0),
+        )
+        .unwrap();
+
+        let plan_path = dir.path().join("plan.jsonl");
+        let mut opts = options(vec![src], dir.path().join("out"));
+        opts.pair_companions = true;
+        let plan = scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
+
+        let picture = plan
+            .entries
+            .iter()
+            .find(|e| e.source.extension().unwrap() == "jpg")
+            .unwrap();
+        let clip = plan
+            .entries
+            .iter()
+            .find(|e| e.source.extension().unwrap() == "mov")
+            .unwrap();
+
+        assert_eq!(clip.taken, picture.taken);
+        assert_eq!(clip.destination.parent(), picture.destination.parent());
+        assert_eq!(clip.provider_info.as_deref(), Some("beside IMG_1234.jpg"));
+        assert_eq!(
+            read_plan(&plan_path).unwrap().entries.len(),
+            plan.entries.len()
+        );
+    }
+
+    #[test]
+    fn companions_are_left_alone_when_the_pairing_is_switched_off() {
+        use filetime::{set_file_mtime, FileTime};
+
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("IMG_1234.jpg"), b"picture").unwrap();
+        fs::write(src.join("IMG_1234.mov"), b"clip").unwrap();
+        set_file_mtime(
+            src.join("IMG_1234.jpg"),
+            FileTime::from_unix_time(1_557_818_523, 0),
+        )
+        .unwrap();
+        set_file_mtime(
+            src.join("IMG_1234.mov"),
+            FileTime::from_unix_time(1_672_531_200, 0),
+        )
+        .unwrap();
+
+        let plan_path = dir.path().join("plan.jsonl");
+        let opts = options(vec![src], dir.path().join("out"));
+        let plan = scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
+
+        let dates: std::collections::HashSet<_> = plan.entries.iter().map(|e| e.taken).collect();
+        assert_eq!(dates.len(), 2);
+    }
 
     #[test]
     fn plans_a_destination_for_every_file() {

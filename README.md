@@ -77,6 +77,18 @@ tags already stored.
 
 Tags live in a `*.tags.json` file beside the plan.
 
+## Files that belong together
+
+A live photo is two files, `IMG_1234.HEIC` and `IMG_1234.MOV`, and their dates rarely match: the
+picture carries EXIF, the video carries whatever its container says. Sorted separately they land in
+two different folders. The same goes for a RAW beside its JPEG, and for `.xmp`, `.aae`, `.thm` and
+Takeout `.json` sidecars, which carry no date of their own worth having.
+
+**Keep files that belong together on one date** groups files by name within a folder, picks the one
+with the most trustworthy date as the master — a picture over a video, a video over a sidecar — and
+gives the rest that date. The preview names the master, as *beside IMG_1234.HEIC*. On the command
+line the grouping is on by default; `--split-companions` turns it off.
+
 ## When the date is wrong
 
 A camera whose battery died resets its clock to a factory default — usually 1 January of 2000, 2003
@@ -239,6 +251,7 @@ it goes, and the plan records relative paths. Naming it on `copy` re-points the 
 | `--strategy oldest` | Earliest date reported. `priority` stops at the first source that reports one. |
 | `--suspect` | On `show`, list only entries whose date looks wrong. |
 | `--auto-rotate` | On `scan`, note sideways pictures so the copy turns them upright. |
+| `--split-companions` | On `scan`, date each file on its own rather than keeping live photo, RAW and sidecar groups together. |
 | `--jobs 8` | Copy this many files in parallel. |
 | `--hash` | Compare contents during `verify`, not just sizes. |
 
