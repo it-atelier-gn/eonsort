@@ -71,8 +71,23 @@ impl Store {
             )",
             [],
         )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS worn (
+                source TEXT NOT NULL,
+                tag    TEXT NOT NULL,
+                PRIMARY KEY (source, tag)
+            )",
+            [],
+        )?;
+        conn.execute("CREATE INDEX IF NOT EXISTS worn_by_tag ON worn (tag, source)", [])?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS sighting_by_quality ON sighting (quality)",
+            [],
+        )?;
 
-        Ok(Self { conn })
+        let store = Self { conn };
+        store.hang_up_missing_tags()?;
+        Ok(store)
     }
 
     pub fn beside(plan_path: &Path) -> Result<Self> {
@@ -155,13 +170,25 @@ impl Store {
                      vector = excluded.vector",
             )?;
 
+            let mut forget = self
+                .conn
+                .prepare_cached("DELETE FROM worn WHERE source = ?1")?;
+            let mut wear = self
+                .conn
+                .prepare_cached("INSERT OR IGNORE INTO worn (source, tag) VALUES (?1, ?2)")?;
+
             for (source, sighting) in sightings {
+                let at = key(&source);
                 insert.execute(rusqlite::params![
-                    key(&source),
+                    at,
                     serde_json::to_string(&sighting.tags)?,
                     sighting.quality.map(|q| q as f64),
                     pack(&sighting.vector),
                 ])?;
+                forget.execute([&at])?;
+                for tag in &sighting.tags {
+                    wear.execute(rusqlite::params![&at, tag])?;
+                }
                 written += 1;
             }
         }
@@ -186,8 +213,56 @@ impl Store {
             "DELETE FROM sighting WHERE source NOT IN (SELECT source FROM wanted)",
             [],
         )?;
+        self.conn.execute(
+            "DELETE FROM worn WHERE source NOT IN (SELECT source FROM wanted)",
+            [],
+        )?;
         self.conn.execute("COMMIT", [])?;
         Ok(gone)
+    }
+
+    fn hang_up_missing_tags(&self) -> Result<usize> {
+        let pending: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM sighting WHERE source NOT IN (SELECT source FROM worn)
+             AND tags <> '[]'",
+            [],
+            |row| row.get(0),
+        )?;
+        if pending == 0 {
+            return Ok(0);
+        }
+
+        let listed = self.listing()?;
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        {
+            let mut wear = self
+                .conn
+                .prepare_cached("INSERT OR IGNORE INTO worn (source, tag) VALUES (?1, ?2)")?;
+            for (source, tags, _) in &listed {
+                let at = key(source);
+                for tag in tags {
+                    wear.execute(rusqlite::params![&at, tag])?;
+                }
+            }
+        }
+        self.conn.execute("COMMIT", [])?;
+        Ok(pending as usize)
+    }
+
+    pub fn counts(&self) -> Result<Vec<(String, usize)>> {
+        let mut query = self
+            .conn
+            .prepare("SELECT tag, COUNT(*) FROM worn GROUP BY tag ORDER BY COUNT(*) DESC, tag")?;
+        let rows = query.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+        })?;
+
+        let mut counted = Vec::new();
+        for row in rows {
+            let (tag, count) = row?;
+            counted.push((tag, count));
+        }
+        Ok(counted)
     }
 
     pub fn listing(&self) -> Result<Vec<Listed>> {
@@ -222,18 +297,23 @@ impl Store {
                 return Ok(Vec::new());
             }
 
-            let mut query = self.conn.prepare("SELECT source, tags FROM sighting")?;
-            let mut rows = query.query([])?;
-            while let Some(row) = rows.next()? {
-                let source = PathBuf::from(row.get::<_, String>(0)?);
-                let tags = from_row_tags(row.get::<_, String>(1)?);
-                let matched = needles
-                    .iter()
-                    .filter(|needle| tags.iter().any(|tag| tag.contains(needle.as_str())))
-                    .count();
-                if matched > 0 {
-                    hits.push((source, matched as f32 / needles.len() as f32));
+            let mut query = self.conn.prepare(
+                "SELECT source, COUNT(DISTINCT tag) FROM worn
+                 WHERE tag LIKE ?1 ESCAPE '#'
+                 GROUP BY source",
+            )?;
+
+            let mut tally: HashMap<PathBuf, usize> = HashMap::new();
+            for needle in &needles {
+                let mut rows = query.query([format!("%{}%", like_safe(needle))])?;
+                while let Some(row) = rows.next()? {
+                    let source = PathBuf::from(row.get::<_, String>(0)?);
+                    *tally.entry(source).or_insert(0) += 1;
                 }
+            }
+
+            for (source, matched) in tally {
+                hits.push((source, matched as f32 / needles.len() as f32));
             }
         } else {
             let mut query = self.conn.prepare("SELECT source, vector FROM sighting")?;
@@ -250,6 +330,13 @@ impl Store {
         hits.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         Ok(hits)
     }
+}
+
+fn like_safe(needle: &str) -> String {
+    needle
+        .replace('#', "##")
+        .replace('%', "#%")
+        .replace('_', "#_")
 }
 
 fn key(source: &Path) -> String {
@@ -485,6 +572,60 @@ mod tests {
         let store = store();
         assert!(store.take_in(&sidecar).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_tags_are_counted_by_the_store_itself() {
+        let store = store();
+        put(&store, "/a.jpg", sighting(&["a dog", "a forest"], vec![]));
+        put(&store, "/b.jpg", sighting(&["a dog"], vec![]));
+
+        assert_eq!(
+            store.counts().unwrap(),
+            vec![("a dog".to_string(), 2), ("a forest".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn seeing_a_picture_again_takes_its_old_tags_off_the_shelf() {
+        let store = store();
+        put(&store, "/a.jpg", sighting(&["a dog"], vec![]));
+        put(&store, "/a.jpg", sighting(&["a wolf"], vec![]));
+
+        assert_eq!(store.counts().unwrap(), vec![("a wolf".to_string(), 1)]);
+        assert!(store.search(&[], "dog").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_pruned_picture_leaves_no_tags_behind() {
+        let store = store();
+        put(&store, "/a.jpg", sighting(&["a dog"], vec![]));
+        put(&store, "/b.jpg", sighting(&["a beach"], vec![]));
+        store.keep_only(&[PathBuf::from("/a.jpg")]).unwrap();
+
+        assert_eq!(store.counts().unwrap(), vec![("a dog".to_string(), 1)]);
+    }
+
+    #[test]
+    fn a_wildcard_in_the_question_is_not_a_wildcard() {
+        let store = store();
+        put(&store, "/a.jpg", sighting(&["a dog"], vec![]));
+        put(&store, "/b.jpg", sighting(&["100% wool"], vec![]));
+
+        let hits = store.search(&[], "%").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0, PathBuf::from("/b.jpg"));
+        assert_eq!(store.search(&[], "100%").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_store_written_before_the_shelf_existed_is_hung_up_on_opening() {
+        let store = store();
+        put(&store, "/a.jpg", sighting(&["a dog"], vec![]));
+        store.conn.execute("DELETE FROM worn", []).unwrap();
+
+        assert_eq!(store.hang_up_missing_tags().unwrap(), 1);
+        assert_eq!(store.counts().unwrap(), vec![("a dog".to_string(), 1)]);
     }
 
     #[test]
