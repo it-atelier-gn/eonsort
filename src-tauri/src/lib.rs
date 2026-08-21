@@ -14,7 +14,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
-            commands::open_sources_window,
             commands::check_folder_pattern,
             commands::cancel_job,
             commands::start_scan,

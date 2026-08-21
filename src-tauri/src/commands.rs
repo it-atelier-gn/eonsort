@@ -27,7 +27,6 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(60);
-const SOURCES_WINDOW: &str = "sources";
 const TAG_BATCH: usize = 40;
 const SEARCH_LIMIT: usize = 500;
 
@@ -152,26 +151,6 @@ pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     let saved = settings::load(&app);
     app.emit("settings:changed", saved)
         .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn open_sources_window(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(SOURCES_WINDOW) {
-        window.show().map_err(|e| e.to_string())?;
-        return window.set_focus().map_err(|e| e.to_string());
-    }
-
-    tauri::WebviewWindowBuilder::new(
-        &app,
-        SOURCES_WINDOW,
-        tauri::WebviewUrl::App("sources".into()),
-    )
-    .title("Where dates come from")
-    .inner_size(560.0, 660.0)
-    .min_inner_size(420.0, 480.0)
-    .build()
-    .map(|_| ())
-    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1263,8 +1242,14 @@ fn tag_store(app: &AppHandle) -> Option<PathBuf> {
     session.plan_path.as_deref().map(tags::tags_path)
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SightingView {
+    pub tags: Vec<String>,
+    pub quality: Option<f32>,
+}
+
 #[tauri::command]
-pub fn list_tags(app: AppHandle) -> Result<HashMap<String, Vec<String>>, String> {
+pub fn list_tags(app: AppHandle) -> Result<HashMap<String, SightingView>, String> {
     let Some(path) = tag_store(&app) else {
         return Ok(HashMap::new());
     };
@@ -1272,7 +1257,15 @@ pub fn list_tags(app: AppHandle) -> Result<HashMap<String, Vec<String>>, String>
     Ok(stored
         .0
         .into_iter()
-        .map(|(source, sighting)| (source.to_string_lossy().into_owned(), sighting.tags))
+        .map(|(source, sighting)| {
+            (
+                source.to_string_lossy().into_owned(),
+                SightingView {
+                    tags: sighting.tags,
+                    quality: sighting.quality.filter(|score| score.is_finite()),
+                },
+            )
+        })
         .collect())
 }
 

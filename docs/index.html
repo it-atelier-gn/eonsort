@@ -404,7 +404,7 @@
     <div class="drift-field" id="driftField"></div>
     <div class="wrap hero-grid">
       <div>
-        <p class="eyebrow">Sorting by date · v0.0.9</p>
+        <p class="eyebrow">Sorting by date · v0.0.10</p>
         <h1>The date on the file<br>is not always <em>the date<br>it was made.</em></h1>
         <p class="lede">eonsort reads <strong>six independent sources</strong> for when a photo or file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. The complete result is shown as a preview before a byte is copied. <strong>Sources are only ever read.</strong></p>
         <div class="cta-row">
@@ -504,7 +504,7 @@
         </div>
       </div>
 
-      <p class="reveal" style="margin-top:18px; color:var(--ink-faint);">A window of its own lists every source: drag them into the order <em>first match wins</em> walks, give each one a weight between 0 and 100 for how much it counts when the evidence is weighed, and untick the ones you never want asked.</p>
+      <p class="reveal" style="margin-top:18px; color:var(--ink-faint);">The setup panel lists every source, one to a line: drag them into the order <em>first match wins</em> walks, and untick the ones you never want asked. How much each source counts when the evidence is weighed is set on the command line.</p>
     </div>
   </section>
 
@@ -678,8 +678,8 @@
           <div class="frame-body">
             <div class="num">05 / SEARCH</div>
             <h3>Search pictures by content, and find the good ones</h3>
-            <p>Once a scan has finished, pictures are tagged in the background, so the scan itself is never held up. Enter <code>forest and dog</code> in ordinary words and every view narrows to the pictures that match, ranked by how well. A second model can judge how good each picture looks, tagging the best <em>a good picture</em> and <em>a beautiful picture</em>; the tag box beside the search picks any tag out of the plan. Both models run locally on the CPU.</p>
-            <div class="kbdrow"><kbd>Enter</kbd><kbd>Clear</kbd><kbd>tag box</kbd></div>
+            <p>Once a scan has finished, pictures are tagged in the background, so the scan itself is never held up. Enter <code>forest and dog</code> in ordinary words and every view narrows to the pictures that match, ranked by how well. A second model can judge how good each picture looks, tagging the best <em>a good picture</em> and <em>a beautiful picture</em>. The filter beside the search works like a spreadsheet column: every tag with its count, ticks, <em>all</em> and <em>none</em>, and a slider that keeps only the pictures rated above a mark you set. Both models run locally on the CPU.</p>
+            <div class="kbdrow"><kbd>Enter</kbd><kbd>Clear</kbd><kbd>tag filter</kbd><kbd>rated at least</kbd></div>
           </div>
           <div class="sprockets bottom"></div>
         </div>
@@ -727,7 +727,7 @@
   <section id="download">
     <div class="wrap">
       <div class="section-head reveal">
-        <p class="eyebrow">Download · v0.0.9</p>
+        <p class="eyebrow">Download · v0.0.10</p>
         <h2>Pick your platform.</h2>
         <p>Free and open source under the MIT license. Installers are below, or build it yourself from source.</p>
       </div>
@@ -741,22 +741,22 @@
 
         <div class="os-panel" id="panel-windows">
           <div class="dl-list">
-            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_x64-setup.exe"><span class="name">Eonsort_0.0.9_x64-setup.exe</span><span class="size">recommended · NSIS installer</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_x64_en-US.msi"><span class="name">Eonsort_0.0.9_x64_en-US.msi</span><span class="size">MSI installer</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/eonsort-windows-x64-portable.zip"><span class="name">eonsort-windows-x64-portable.zip</span><span class="size">no install</span></a>
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.10/Eonsort_0.0.10_x64-setup.exe"><span class="name">Eonsort_0.0.10_x64-setup.exe</span><span class="size">recommended · NSIS installer</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.10/Eonsort_0.0.10_x64_en-US.msi"><span class="name">Eonsort_0.0.10_x64_en-US.msi</span><span class="size">MSI installer</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.10/eonsort-windows-x64-portable.zip"><span class="name">eonsort-windows-x64-portable.zip</span><span class="size">no install</span></a>
           </div>
         </div>
         <div class="os-panel" id="panel-mac">
           <div class="dl-list">
-            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_aarch64.dmg"><span class="name">Eonsort_0.0.9_aarch64.dmg</span><span class="size">recommended · Apple Silicon</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_x64.dmg"><span class="name">Eonsort_0.0.9_x64.dmg</span><span class="size">Intel</span></a>
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.10/Eonsort_0.0.10_aarch64.dmg"><span class="name">Eonsort_0.0.10_aarch64.dmg</span><span class="size">recommended · Apple Silicon</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.10/Eonsort_0.0.10_x64.dmg"><span class="name">Eonsort_0.0.10_x64.dmg</span><span class="size">Intel</span></a>
           </div>
         </div>
         <div class="os-panel" id="panel-linux">
           <div class="dl-list">
-            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_amd64.AppImage"><span class="name">Eonsort_0.0.9_amd64.AppImage</span><span class="size">recommended · runs anywhere</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort_0.0.9_amd64.deb"><span class="name">Eonsort_0.0.9_amd64.deb</span><span class="size">Debian / Ubuntu</span></a>
-            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.9/Eonsort-0.0.9-1.x86_64.rpm"><span class="name">Eonsort-0.0.9-1.x86_64.rpm</span><span class="size">Fedora / RHEL</span></a>
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.10/Eonsort_0.0.10_amd64.AppImage"><span class="name">Eonsort_0.0.10_amd64.AppImage</span><span class="size">recommended · runs anywhere</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.10/Eonsort_0.0.10_amd64.deb"><span class="name">Eonsort_0.0.10_amd64.deb</span><span class="size">Debian / Ubuntu</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v0.0.10/Eonsort-0.0.10-1.x86_64.rpm"><span class="name">Eonsort-0.0.10-1.x86_64.rpm</span><span class="size">Fedora / RHEL</span></a>
           </div>
         </div>
         <p class="all-releases">Checksums, earlier versions, and CLI‑only tarballs are on the <a href="https://github.com/it-atelier-gn/eonsort/releases" target="_blank" rel="noopener">releases page ↗</a></p>

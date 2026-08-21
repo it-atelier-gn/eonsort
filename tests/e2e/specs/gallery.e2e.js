@@ -2,10 +2,6 @@ describe("Gallery view", () => {
   before(async () => {
     const gallery = await $("button=Gallery");
     await gallery.click();
-    await browser.waitUntil(async () => (await $$(".loading")).length === 0, {
-      timeout: 180000,
-      timeoutMsg: "the plan never finished loading",
-    });
     await browser.waitUntil(async () => (await $$(".gallery canvas")).length > 0, {
       timeout: 60000,
       timeoutMsg: "the gallery canvas never mounted",

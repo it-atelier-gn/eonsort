@@ -5,11 +5,12 @@ import {
   enabledIn,
   isProvider,
   listing,
+  moveBy,
   moveSource,
+  rowAt,
   sourceOf,
   toggled,
   weightOf,
-  withWeight,
   MAX_WEIGHT,
   MIN_WEIGHT,
   SOURCES,
@@ -54,6 +55,18 @@ describe("Putting the sources in an order of your own", () => {
     expect(moveSource(order, "exif", "exif")).toEqual(order);
   });
 
+  it("walks a source one place up or down", () => {
+    const order = listing(["filename", "exif", "media"]);
+    expect(moveBy(order, "exif", -1)[0]).toBe("exif");
+    expect(moveBy(order, "exif", 1).slice(0, 3)).toEqual(["filename", "media", "exif"]);
+  });
+
+  it("leaves a source at the end of the list where it is", () => {
+    const order = listing(SOURCES.map((source) => source.id));
+    expect(moveBy(order, order[0], -1)).toEqual(order);
+    expect(moveBy(order, order[order.length - 1], 1)).toEqual(order);
+  });
+
   it("keeps the sources in use in the order the list shows", () => {
     const order = listing(["filesystem", "exif", "filename"]);
     expect(enabledIn(order, ["filename", "exif"])).toEqual(["exif", "filename"]);
@@ -80,20 +93,31 @@ describe("Weighing a source", () => {
     expect(weightOf({ exif: Number.NaN }, "exif")).toBe(sourceOf("exif").weight);
   });
 
-  it("writes a weight without touching the ones it was given", () => {
-    const held = { exif: 50 };
-    const next = withWeight(held, "filename", 70);
-    expect(held).toEqual({ exif: 50 });
-    expect(next).toEqual({ exif: 50, filename: 70 });
-  });
-
-  it("drops a weight to go back to the one it was born with", () => {
-    expect(withWeight({ exif: 50 }, "exif", null)).toEqual({});
-  });
-
   it("says when nothing has been changed", () => {
     expect(atDefaults({})).toBe(true);
     expect(atDefaults({ exif: sourceOf("exif").weight })).toBe(true);
     expect(atDefaults({ exif: 1 })).toBe(false);
+  });
+});
+
+describe("Finding the line a drag is over", () => {
+  const rows = [
+    { top: 0, bottom: 10 },
+    { top: 10, bottom: 20 },
+    { top: 20, bottom: 30 },
+  ];
+
+  it("names the line the pointer is on", () => {
+    expect(rowAt(rows, 15)).toBe(1);
+    expect(rowAt(rows, 25)).toBe(2);
+  });
+
+  it("holds on to the first and last line when the pointer leaves the list", () => {
+    expect(rowAt(rows, -40)).toBe(0);
+    expect(rowAt(rows, 400)).toBe(2);
+  });
+
+  it("has nothing to name when there are no lines", () => {
+    expect(rowAt([], 5)).toBe(-1);
   });
 });

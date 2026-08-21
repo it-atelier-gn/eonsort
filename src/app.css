@@ -100,6 +100,7 @@ button.ghost:hover:not(:disabled) {
 
 input[type="text"],
 input[type="number"],
+input[type="search"],
 select {
   font: inherit;
   color: var(--text);

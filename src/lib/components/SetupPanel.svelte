@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { open } from "@tauri-apps/plugin-dialog";
   import {
@@ -8,13 +8,21 @@
     formatBytes,
     installQualityModel,
     installTagModel,
-    openSourcesWindow,
     qualityModelStatus,
     tagModelStatus,
     type TagModelStatus,
   } from "$lib/api";
-  import type { Settings, Strategy } from "$lib/api";
-  import { sourceOf } from "$lib/sources";
+  import type { Provider, Settings, Strategy } from "$lib/api";
+  import {
+    atDefaults,
+    enabledIn,
+    listing,
+    moveBy,
+    moveSource,
+    rowAt,
+    sourceOf,
+    toggled,
+  } from "$lib/sources";
 
   interface Props {
     settings: Settings;
@@ -141,14 +149,56 @@
     onChange({ ...settings, sources: settings.sources.filter((s) => s !== path) });
   }
 
-  const inUse = $derived(settings.providers.map((id) => sourceOf(id).label).join(", "));
+  let order = $state<Provider[]>(untrack(() => listing(settings.providers)));
+  let dragging = $state<Provider | null>(null);
+  let list = $state<HTMLElement | null>(null);
 
-  async function editSources() {
-    try {
-      await openSourcesWindow();
-    } catch {
-      // a window that will not open is reported by the window itself
+  $effect(() => {
+    const enabled = settings.providers;
+    if (enabledIn(untrack(() => order), enabled).join() !== enabled.join()) {
+      order = listing(enabled);
     }
+  });
+
+  function reorder(next: Provider[]) {
+    order = next;
+    onChange({ ...settings, providers: enabledIn(next, settings.providers) });
+  }
+
+  function nudge(id: Provider, by: number) {
+    reorder(moveBy(order, id, by));
+  }
+
+  function resetWeights() {
+    onChange({ ...settings, weights: {} });
+  }
+
+  function toggleProvider(id: Provider) {
+    onChange({ ...settings, providers: toggled(settings.providers, order, id) });
+  }
+
+  function grab(event: PointerEvent, id: Provider) {
+    if (busy || event.button !== 0) return;
+    event.preventDefault();
+    const grip = event.currentTarget as HTMLElement;
+    grip.setPointerCapture(event.pointerId);
+    dragging = id;
+  }
+
+  function slide(event: PointerEvent) {
+    if (dragging === null || list === null) return;
+    const rows = [...list.children].map((row) => row.getBoundingClientRect());
+    const target = order[rowAt(rows, event.clientY)];
+    if (target === undefined || target === dragging) return;
+    order = moveSource(order, dragging, target);
+  }
+
+  function release(event: PointerEvent) {
+    if (dragging === null) return;
+    const grip = event.currentTarget as HTMLElement;
+    if (grip.hasPointerCapture(event.pointerId)) grip.releasePointerCapture(event.pointerId);
+    dragging = null;
+    reorder(order);
   }
 </script>
 
@@ -213,11 +263,47 @@
   <section>
     <div class="head">
       <label for="providers">Where dates come from</label>
-      <button class="ghost" onclick={editSources} disabled={busy}>Order and weight…</button>
+      <button
+        class="ghost"
+        onclick={resetWeights}
+        disabled={busy || atDefaults(settings.weights ?? {})}
+        title="Put every source back to the weight it counts for by default"
+      >
+        Reset weights
+      </button>
     </div>
-    <p id="providers" class="faint hint">
-      {inUse === "" ? "No source is being asked for a date." : inUse}
-    </p>
+    <ol id="providers" class="sources" bind:this={list}>
+      {#each order as id (id)}
+        {@const source = sourceOf(id)}
+        {@const on = settings.providers.includes(id)}
+        <li class="source" class:off={!on} class:held={dragging === id} title={source.hint}>
+          <span
+            class="grip"
+            role="button"
+            tabindex={busy ? -1 : 0}
+            aria-label="Move {source.label}, with the arrow keys or by dragging"
+            onpointerdown={(e) => grab(e, id)}
+            onpointermove={slide}
+            onpointerup={release}
+            onpointercancel={release}
+            onkeydown={(e) => {
+              if (busy || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+              e.preventDefault();
+              nudge(id, e.key === "ArrowUp" ? -1 : 1);
+            }}>⠿</span
+          >
+          <label class="check pick">
+            <input
+              type="checkbox"
+              checked={on}
+              disabled={busy}
+              onchange={() => toggleProvider(id)}
+            />
+            <span class="truncate">{source.label}</span>
+          </label>
+        </li>
+      {/each}
+    </ol>
   </section>
 
 
@@ -440,6 +526,52 @@
     display: flex;
     gap: 6px;
     align-items: center;
+  }
+
+  .sources {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .source {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-raised);
+  }
+
+  .source.off {
+    opacity: 0.55;
+  }
+
+  .source.held {
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  .grip {
+    padding: 0 2px;
+    color: var(--text-faint);
+    cursor: grab;
+    line-height: 1;
+    user-select: none;
+    touch-action: none;
+  }
+
+  .source.held .grip {
+    cursor: grabbing;
+  }
+
+  .source .pick {
+    margin: 0;
+    font-size: 12px;
+    min-width: 0;
   }
 
 

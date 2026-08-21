@@ -11,316 +11,18 @@ tool last touched them.
 Point it at your photo folders, press **Scan**, and you get the full resulting tree as a preview
 before a byte is copied. Then press **Copy files**. Sources are only ever read.
 
-The tree is a table: **Folder**, **Files** and **Size**, each column sized to what is in it, drag
-the edge of a heading to set a width of your own or double-click that edge to fit the contents
-again, and drag the heading itself to reorder. Widths and order are both remembered. The file list
-beside it works the same way, with **Name**, **Date**, **From**, **Size** and **Status**, and keeps
-its own widths and order. Clicking a folder shows everything underneath it, so a year lists its
-whole year rather than nothing at all, and a time range picked in **Charts** prunes the tree to
-match.
-
-In the file list, <kbd>↑</kbd> and <kbd>↓</kbd> walk from file to file with the preview pane
-following the selection, <kbd>Home</kbd> and <kbd>End</kbd> jump to either end, and <kbd>Enter</kbd>
-opens the selected file. The installed version is shown at the right-hand end of the status bar.
-
 Windows, Linux and macOS — desktop app and `eonsort` command line tool.
 
 ![Eonsort desktop app](docs/screenshot.png)
 
+Seven independent date sources, cross-checked; camera-clock resets and other wrong dates flagged and
+correctable by hand; pictures turned upright, duplicates found, and — optionally — tagged and rated
+by two models running locally on the CPU.
+**[What it does, in full →](https://it-atelier-gn.github.io/eonsort/)**
+
 ---
 
-## How the date is found
-
-| Source | What it reads |
-|---|---|
-| **File name** | `IMG_20230506_101112.jpg`, `Screenshot 2021-07-04 at 09.05.01.png`, `Rechnung 06.05.2021.pdf`, and many more shapes |
-| **EXIF** | `DateTimeOriginal` and friends in JPEG, TIFF, PNG, WebP, HEIF and common raw formats |
-| **Media** | `com.apple.quicktime.creationdate` where a phone wrote one, otherwise the `mvhd` box of MP4, MOV, M4A and related containers |
-| **XMP sidecar** | `exif:DateTimeOriginal`, `photoshop:DateCreated` or `xmp:CreateDate` in the `.xmp` a raw developer writes beside a picture |
-| **Google Takeout** | `photoTakenTime` in the JSON sidecar a Google Photos export leaves beside each file |
-| **System properties** | Last resort: what the desktop itself knows. `System.Photo.DateTaken` and `System.Media.DateEncoded` on Windows, `kMDItemContentCreationDate` on macOS |
-| **File system** | Whichever of created / modified is older |
-
-A raw developer keeps its work in an `.xmp` beside the picture, either `IMG_1234.xmp` as Lightroom
-writes it or `IMG_1234.CR2.xmp` as darktable does. That file carries the date the photographer
-settled on, so it is trusted above the camera's own tag: a date corrected in Lightroom is a
-deliberate decision, while the EXIF block still holds whatever the camera thought at the time.
-
-A Google Photos export is the most common way a collection loses its dates: Takeout strips the
-capture time out of the file and parks it in a sidecar. Eonsort reads that sidecar back, including
-the shapes Takeout actually writes — `IMG_1234.JPG.json`, `IMG_1234.JPG.supplemental-metadata.json`,
-names cut short to fit its 51 character limit, `IMG_1234.JPG(1).json` beside a numbered copy, and an
-`-edited` picture falling back to the original's sidecar.
-
-Both desktops keep a metadata layer that plugins extend, and both know dates for formats no library
-here can parse. On Windows the Details tab in a file's properties is filled in by whatever property
-handler is registered for that type, which is how Explorer dates vendor raw files covered by an
-installed codec pack, ASF, WMV and anything else a handler exists for. On macOS the same job is done
-by Spotlight and its `.mdimporter` plugins, and `mdls` shows exactly what eonsort reads.
-
-Eonsort asks either one only for files no other source could date, so the cost falls on a handful of
-exotic files rather than on the whole scan. Each call runs on its own thread with a three second
-limit, so a slow or wedged handler reads as "no date" rather than holding the scan up. Only genuine
-capture properties are read, and an answer that merely repeats the file's own created or modified
-time is discarded rather than reported: `System.ItemDate` on Windows and
-`kMDItemContentCreationDate` on macOS both fall back to the file times when a file carries no
-metadata of its own, and a source that only echoes the file system is not a source.
-
-Linux has no counterpart worth reading. Tracker and Baloo are the nearest thing, but they are
-desktop indexers rather than a system service: absent on servers, often not indexing the folder you
-are sorting, and answering from an index that may be stale. Extended attributes have no agreed key
-for a capture date. What Linux does offer, the `statx` birth time, is already read by the file
-system source.
-
-Every source that reports a date is kept. Each can be switched off. Three rules choose between them:
-
-| Rule | What it does |
-|---|---|
-| **Weigh the evidence** (default) | Discards impossible dates, then prefers the one two sources agree on |
-| **Oldest date wins** | Keeps the earliest date any source reports |
-| **First match wins** | Walks the sources in order, stops at the first hit |
-
-**Order and weight…** beside *Where dates come from* opens a window of its own listing every source.
-Drag a source, or use the arrows, to set the order **First match wins** walks. Give each source a
-weight between 0 and 100 to say how much it counts when the evidence is weighed — EXIF starts at 40,
-the file system at 10 — and **Reset the weights** puts them all back. The tick decides whether a
-source is asked at all. Changes are saved as you make them and reach the main window at once.
-
-## Finding a picture by what is in it
-
-Tick **Look at pictures and tag them after a scan**. Once the scan finishes, eonsort works through
-the pictures in the background — the scan itself is never held up — and gives each one a handful of
-plain tags: *a forest*, *a dog*, *a birthday party*. Tags show in the preview pane.
-
-It also keeps the embedding it computed, so the search box takes ordinary words rather than tag
-names. Type `forest and dog` and press Enter; every view narrows to the pictures that match, ranked
-by how well. **Clear** puts everything back. The box beside it lists every tag in the plan: pick one
-and the whole app narrows to the pictures carrying it.
-
-The work is [SigLIP](https://huggingface.co/google/siglip-base-patch16-224) running locally on the
-CPU — nothing leaves your machine, and no runner needs hosting. Released builds ship with it; all it
-needs is a one-off download of about 780 MB, offered in the setup panel. A build of your own needs
-the `tagging` feature turned on:
-
-```sh
-cargo tauri build --features upright,tagging
-```
-
-Weights land in `models/<owner>--<model>/` inside the app data folder, one folder per model so two
-models can bring a file of the same name; delete `models/` to reclaim the space.
-Pictures already tagged are skipped when the pass runs again, so a second scan only looks at what is
-new. Without the feature, the search box still works — it falls back to matching your words against
-tags already stored.
-
-## Finding the good ones
-
-Tick **Also judge how good each picture looks** and a second model scores every picture the way
-people rated photographs, from about 1 to 10. Anything from 5.5 up is tagged *a good picture*, and
-from 6.2 up *a beautiful picture*, so the tag box beside the search finds the best of a shoot
-without you opening any of it. The score is kept beside the tags.
-
-That model is the
-[LAION aesthetic predictor](https://huggingface.co/shunk031/aesthetics-predictor-v1-vit-base-patch32)
-— a CLIP ViT-B/32 tower with a linear head — again running on the CPU, a one-off download of about
-335 MB offered next to the tagging model. A build of your own needs the `quality` feature:
-
-```sh
-cargo tauri build --features upright,tagging,quality
-```
-
-It runs inside the tagging pass, so it needs the tagging model too and costs a little more time per
-picture.
-
-Tags and scores live in a `*.tags.json` file beside the plan.
-
-## Files that belong together
-
-A live photo is two files, `IMG_1234.HEIC` and `IMG_1234.MOV`, and their dates rarely match: the
-picture carries EXIF, the video carries whatever its container says. Sorted separately they land in
-two different folders. The same goes for a RAW beside its JPEG, and for `.xmp`, `.aae`, `.thm` and
-Takeout `.json` sidecars, which carry no date of their own worth having.
-
-**Keep files that belong together on one date** groups files by name within a folder, picks the one
-with the most trustworthy date as the master — a picture over a video, a video over a sidecar — and
-gives the rest that date. The preview names the master, as *beside IMG_1234.HEIC*. On the command
-line the grouping is on by default; `--split-companions` turns it off.
-
-## When the date is wrong
-
-A camera whose battery died resets its clock to a factory default — usually 1 January of 2000, 2003
-or 2015 — and every photo after that carries a date that looks real. Eonsort flags rather than
-quietly misfiles:
-
-- a date on a factory-reset instant, in the future, or later than the file was written
-- a run of files counting up from a reset date while the files were written years later
-- a batch sharing one timestamp to the second
-- a file stranded years from everything else in its folder, or out of step with its camera's counter
-
-A whole number of hours between two sources is reported as a note rather than a fault: that is the
-shape of a time zone, not of a wrong date. Videos are the usual cause, because `mvhd` records UTC
-with no zone at all. Where a phone also wrote `com.apple.quicktime.creationdate`, eonsort takes that
-instead, so a clip filmed abroad keeps the wall clock time it was filmed at rather than being shifted
-into the zone of the machine doing the sorting. Photos carry the same information in
-`OffsetTimeOriginal`, which is shown beside the date it came from.
-
-Flagged files appear under **Issues**; clicking a group selects them. In the preview pane you can
-take the date from another source, type one in, or anchor one file to its true date and shift the
-whole selection by that offset, keeping the gaps intact.
-
-Corrections live in a `*.overrides.json` file beside the plan. They survive reopening, they are what
-the copy uses, and any of them can be undone. A file that has already been copied refuses to be
-re-dated.
-
-## Seeing it rather than reading it
-
-Four visual tabs. In the two walkable ones: click to take the mouse,
-<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, <kbd>Shift</kbd> to run, mouse to look,
-<kbd>Esc</kbd> to give the mouse back.
-
-### Timeline
-
-The whole plan in 3D, one point per date each source reported, coloured by confidence. Three
-layouts, morphing between them:
-
-| Layout | What it shows |
-|---|---|
-| **Disagreement field** | Time across, one lane per source, depth by how many files stack up. Agreeing sources collapse to a tick; EXIF 2003 against file system 2019 draws a long red streak. |
-| **Time helix** | One turn per year, month around the turn, hour of day as radius. Bad dates lift out of the disc. |
-| **Memory terrain** | Time across, hour of day in depth, file count as height. A reset date becomes a spire on an empty plain. |
-
-Detail follows distance: zoomed out, one muted dot per file with only suspect dates keeping their
-colour; closer, every source's reading and the full colour key; closer still, the photographs
-themselves in place, with videos playing. Long empty stretches are compressed so a lonely 2003
-island and a dense 2019 cluster are both readable on one axis. Clicking a point opens that file in
-the preview pane. **Auto-fly** cruises from oldest to newest; any drag takes the controls back.
-
-### Gallery
-
-Builds a building out of your archive, laid out afresh for every collection. One room per period,
-oldest first, its size set by how many files that period holds and its shape drawn at random; the
-plan turns left and right as it goes, so no two archives walk the same way. The layout is seeded
-from the files themselves, so the same plan always gives you the same building. Short corridors
-join the rooms, each with a doorway you can see the lintel of and the next room through.
-
-Every wall is a solid block with a face on both sides, so nothing disappears when you look at it
-from the other room. Light comes from outside and from inside at once: daylight falls through the
-clerestory band high on the walls, and lamps hang from the ceilings, over the pictures and along
-the corridors, lighting the walls, the floor and the frames near them.
-
-Pictures hang at eye height on every wall the doorways leave free, videos play in frame, and there
-are benches, plinths and planters to walk around. Look at a picture for its name and date; click or
-press <kbd>E</kbd> to open it in the preview pane.
-
-### Rings
-
-One ring per year, stacked with the newest on top, and the pictures of that year standing side by
-side around it, facing outwards. A ring widens with the number of files that landed in the year, so
-a busy year is a wide hoop and a thin one a small circle; a year with more pictures than fit side by
-side is thinned to an even sample across the year and its label says so. Every month has a colour of
-its own, so the same season sits at the same angle on every ring and the seasons read as bands. The
-pictures nearest the eye load their thumbnails; the rest stay as coloured tiles.
-
-Drag to turn the stack and the wheel to zoom; steps get finer the nearer you come, so the pictures
-cannot be overshot from behind. A slider on the right lifts your eye up and down the stack, with the
-years listed beside it — click one and the view glides to that ring and settles level with it, so
-the ring sits centred. A second slider tilts you from below the stack to above it. **Turn** lets the
-stack rotate on its own, at whatever pace the speed slider asks for; a wide year turns more slowly
-than a narrow one, so the pictures drift past at much the same speed either way. Click a picture to
-open it in the preview pane. **Spiral** unwinds the rings into one continuous coil — each year
-climbs through its own turn and meets the next where it left off — and **Rings** stacks them flat
-again. Everything here works the same in either.
-
-### Charts
-
-The same questions in flat 2D, often quicker to read:
-
-| Figure | The question it answers |
-|---|---|
-| **When your files were made** | A square per month, year by year. Where are the gaps? Click in to go finer. |
-| **Time of day** | Do the hours look like a camera roll? A midnight spike means dates with no time. |
-| **Where each date came from** | Which source was trusted. A large "file system" share means many dates are really copy dates. |
-| **How sure eonsort is** | The timeline's four colours, with what each means. |
-| **Where the bulk lands** | The fullest destination folders — one outsized folder is usually where unknown dates collected. |
-
-The first figure is also the way in. Click a square to drop into it, drag for a range, or click a
-row label for a whole year; the grid refines from years to months to days to hours.
-
-Whatever you pick scopes the whole app: every figure recounts itself, and the folder tree, Timeline,
-Gallery and Rings show only those files. A bar under the toolbar tracks where you are —
-`All time › 2019 › Mar 2019` — each step clickable, plus **Back** and **Show all**. Scanning again
-clears it.
-
-## Turning pictures upright
-
-Cameras store a sideways photo the way the sensor saw it, with an orientation tag saying which way
-is up. Plenty of software ignores the tag.
-
-Tick **Turn pictures upright when copying** before scanning. The scan records what the copy should
-do; the copy turns the pixels for real and sets the tag to "already upright", so the result looks
-right everywhere. Originals are never touched.
-
-For JPEGs the turn is genuinely lossless — compressed data is rearranged, not decoded and
-recompressed — and the EXIF block survives intact.
-
-The preview shows every picture as it will be copied. Hold <kbd>Ctrl</kbd> and turn the wheel to
-zoom into it — the spot under the pointer stays where it is — then drag to pan; the small `−`, `+`
-and `⟲` buttons in the corner do the same without a wheel. The zoom resets as soon as another file
-is selected. Any picture can also be corrected:
-
-| Key | |
-|---|---|
-| `[` | quarter turn left |
-| `]` | quarter turn right |
-| `\` | upside down |
-| `0` | back to what the tag asked for |
-
-The same buttons sit under the preview; selecting several files gives a bulk turn in the bottom bar.
-
-Non-JPEGs, and JPEGs whose dimensions are not a whole number of compression blocks, cannot be turned
-losslessly. They are copied untouched and the preview says so. A button will turn one anyway, naming
-the cost: re-encoding and dropped metadata.
-
-Turns live in `*.rotations.json` beside the plan, and a copied file refuses to be turned. One
-caveat: the small thumbnail inside a photo's own EXIF block is left as it was, so a viewer showing
-that thumbnail may still show it sideways.
-
-## Copies of the same picture
-
-**Copies** in the status bar reads every file in the plan and reports two things. Files that hold
-exactly the same bytes are grouped, heaviest group first, with the space their repetition costs;
-files of the same length are compared by content, never taken for each other on size alone. Beneath
-that come bursts: runs of near-identical pictures taken seconds apart, found by comparing what they
-look like rather than what they contain.
-
-Clicking a group selects its files, so the preview and the bottom bar act on them. Nothing is
-deleted: eonsort only ever reads sources, and the copy already keeps one of each identical file.
-
-## Writing the date onto the copy
-
-Tick **Write the chosen date into the copy** and every JPEG that already carries EXIF dates leaves
-with the date eonsort settled on, corrections included, written into `DateTimeOriginal`,
-`DateTimeDigitized` and `DateTime`. The bytes are patched in place, so the picture is otherwise
-untouched and the file keeps its length; a second copy of the same plan still recognises what it
-already wrote rather than duplicating it. Files with no date tags to overwrite, videos included, are
-copied byte for byte as before.
-
-Sources are never written to. On the command line the flag is `--stamp-date`.
-
-## How many files at once
-
-The copy no longer asks. It looks at what it is about to move and picks the number of parallel
-copies from the average file size: a few workers for large files, where one stream already saturates
-the disk, and more for a mass of small ones, where the cost is per file rather than per byte. The
-`--jobs` flag still overrides it on the command line.
-
-## Safety
-
-- **Nothing is overwritten.** Same-name files are compared by content; identical ones are left alone, different ones stored beside as `name_dup_1.jpg`.
-- **Every copy is atomic.** Written to staging, flushed, then renamed into place.
-- **Everything resumes.** The scan appends to its plan, the copy keeps a journal. Stopping a run, or losing power, costs nothing.
-- **Sources are only ever read.**
-
-## Quick Start
+## Install
 
 Grab an installer from the [releases page](https://github.com/it-atelier-gn/eonsort/releases), or
 build it yourself.
@@ -339,6 +41,15 @@ cd eonsort
 npm install
 npx tauri dev          # npx tauri build for release bundles
 ```
+
+Releases ship with every optional feature. A build of your own turns them on by name:
+
+```sh
+cargo tauri build --features upright,tagging,quality
+```
+
+`upright` turns sideways pictures losslessly, `tagging` reads what is in them, `quality` rates them.
+Both models are downloaded once from the setup panel into `models/` in the app data folder.
 
 ---
 
@@ -364,9 +75,6 @@ eonsort show --plan photos.jsonl --suspect     # only entries whose date looks w
 eonsort copy --plan photos.jsonl --destination "E:\Sorted"
 eonsort verify --plan photos.jsonl --hash
 ```
-
-`--destination` is optional on `scan` — leave it out to see the folder layout before deciding where
-it goes, and the plan records relative paths. Naming it on `copy` re-points the plan.
 
 | Flag | Meaning |
 |---|---|
@@ -394,13 +102,9 @@ Contributions are welcome. For substantial changes, open an issue first.
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && npm run check && npm test
 ```
 
-The optional `upright` and `tagging` features are not in that line; CI checks them in separate
-non-blocking jobs. If you touch `upright.rs`, `yolo.rs` or `tagging.rs`:
-
-```sh
-cargo clippy -p eonsort-core --features upright --all-targets -- -D warnings && cargo test -p eonsort-core --features upright
-cargo clippy -p eonsort-core --features tagging --all-targets -- -D warnings && cargo test -p eonsort-core --features tagging
-```
+The optional features are not in that line; CI checks them in separate non-blocking jobs. If you
+touch `upright.rs`, `yolo.rs`, `tagging.rs` or `quality.rs`, run clippy and the tests with the
+matching feature as well.
 
 The application icon is generated. To change it, edit `scripts/make-icon.mjs` and run `npm run icon`.
 
@@ -418,10 +122,8 @@ npm run test:e2e
 On Windows the matching Edge WebDriver downloads automatically. On Linux, install
 `webkit2gtk-driver` (or your distro's equivalent) so `WebKitWebDriver` is on `PATH`.
 
-`npm run test:e2e` builds a debug binary, launches it under `tauri-driver`, and runs the specs in
-`tests/e2e/specs`. **Close any running eonsort window first** — the rebuild cannot replace a locked
-`.exe`, and the suite will then quietly run the previous binary and pass without testing your
-changes.
+**Close any running eonsort window first** — the rebuild cannot replace a locked `.exe`, and the
+suite will then quietly run the previous binary and pass without testing your changes.
 
 ---
 

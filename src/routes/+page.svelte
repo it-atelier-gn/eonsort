@@ -79,6 +79,16 @@
   import GalleryView from "$lib/components/GalleryView.svelte";
   import RingsView from "$lib/components/RingsView.svelte";
   import ScopeBar from "$lib/components/ScopeBar.svelte";
+  import {
+    keepsQuality,
+    keepsTags,
+    pickedLabel,
+    tagCounts,
+    type Sighting,
+    MIN_QUALITY,
+    UNTAGGED,
+  } from "$lib/tags";
+  import TagFilter from "$lib/components/TagFilter.svelte";
   import { filterRange, sameRange, type TimeRange } from "$lib/viz/range";
 
   type Job = "scan" | "copy" | "verify";
@@ -105,8 +115,9 @@
   );
   let tagging = $state(false);
   let tagNote = $state<string | null>(null);
-  let tagsBySource = $state<Record<string, string[]>>({});
-  let pickedTag = $state("");
+  let tagsBySource = $state<Record<string, Sighting>>({});
+  let pickedTags = $state<string[] | null>(null);
+  let leastQuality = $state(MIN_QUALITY);
   let query = $state("");
   let hits = $state<TagHit[] | null>(null);
   let searching = $state(false);
@@ -221,12 +232,17 @@
   const taggedEntries = $derived(
     timelineEntries.map((entry) => {
       const seen = tagsBySource[entry.source];
-      return seen && seen.length > 0 ? { ...entry, tags: seen } : entry;
+      if (seen === undefined) return entry;
+      return {
+        ...entry,
+        tags: seen.tags.length > 0 ? seen.tags : entry.tags,
+        quality: seen.quality,
+      };
     }),
   );
-  const knownTags = $derived(
-    [...new Set(Object.values(tagsBySource).flat())].sort((a, b) => a.localeCompare(b)),
-  );
+  const counts = $derived(tagCounts(taggedEntries));
+  const anyRated = $derived(taggedEntries.some((entry) => entry.quality != null));
+  const anyTagged = $derived(counts.some((count) => count.tag !== UNTAGGED));
   const searchedEntries = $derived(
     hits === null
       ? taggedEntries
@@ -234,10 +250,11 @@
           .map((hit) => taggedEntries.find((entry) => entry.source === hit.source))
           .filter((entry): entry is EntryView => entry !== undefined),
   );
+  const narrowed = $derived(pickedTags !== null || leastQuality > MIN_QUALITY);
   const foundEntries = $derived(
-    pickedTag === ""
-      ? searchedEntries
-      : searchedEntries.filter((entry) => entry.tags.includes(pickedTag)),
+    searchedEntries.filter(
+      (entry) => keepsTags(entry.tags, pickedTags) && keepsQuality(entry.quality, leastQuality),
+    ),
   );
   const scopedEntries = $derived(filterRange(foundEntries, scope));
   const entries = $derived(under(scopedEntries, selectedFolder));
@@ -731,21 +748,19 @@
         <button class:active={view === "rings"} onclick={() => showAll("rings")}>Rings</button>
       </div>
       <div class="look">
-        {#if knownTags.length > 0}
-          <select
-            bind:value={pickedTag}
-            title="Show only the pictures carrying one tag"
-            aria-label="Filter by tag"
-          >
-            <option value="">Any tag</option>
-            {#each knownTags as tag (tag)}
-              <option value={tag}>{tag}</option>
-            {/each}
-          </select>
+        {#if anyTagged}
+          <TagFilter
+            {counts}
+            picked={pickedTags}
+            least={leastQuality}
+            rated={anyRated}
+            onPick={(next) => (pickedTags = next)}
+            onRate={(next) => (leastQuality = next)}
+          />
         {/if}
         <input
           type="search"
-          placeholder="forest and dog"
+          placeholder="Search the pictures"
           bind:value={query}
           onkeydown={(e) => {
             if (e.key === "Enter") void look();
@@ -768,7 +783,7 @@
     </div>
   </header>
 
-  {#if tagProgress || tagNote || hits !== null || pickedTag !== ""}
+  {#if tagProgress || tagNote || hits !== null || narrowed}
     <div class="tagbar faint tiny">
       {#if tagProgress}
         <span class="spinner"></span>
@@ -789,11 +804,22 @@
         <span>{hits.length.toLocaleString()} pictures match &ldquo;{query.trim()}&rdquo;</span>
         <button class="ghost" onclick={clearSearch}>Show all again</button>
       {/if}
-      {#if pickedTag !== ""}
+      {#if narrowed}
         <span>
-          {foundEntries.length.toLocaleString()} tagged &ldquo;{pickedTag}&rdquo;
+          {foundEntries.length.toLocaleString()} of {searchedEntries.length.toLocaleString()} pictures
+          left by {pickedLabel(pickedTags, counts).toLowerCase()}{leastQuality > MIN_QUALITY
+            ? `, rated ${leastQuality.toFixed(1)} and up`
+            : ""}
         </span>
-        <button class="ghost" onclick={() => (pickedTag = "")}>Every tag again</button>
+        <button
+          class="ghost"
+          onclick={() => {
+            pickedTags = null;
+            leastQuality = MIN_QUALITY;
+          }}
+        >
+          Every picture again
+        </button>
       {/if}
       {#if tagNote}
         <span>{tagNote}</span>
@@ -1134,8 +1160,9 @@
     gap: 6px;
   }
 
-  .look input {
-    width: 190px;
+  .look input[type="search"] {
+    width: 220px;
+    padding-block: 9px;
   }
 
   .tagbar {

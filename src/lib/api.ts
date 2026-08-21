@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Sighting } from "$lib/tags";
 
 export type Provider =
   | "filename"
@@ -122,6 +123,7 @@ export interface EntryView {
   subject: string | null;
   tags: string[];
   caption: string | null;
+  quality?: number | null;
 }
 
 export interface SkippedView {
@@ -237,7 +239,6 @@ export type Thumbnail =
 
 export const getSettings = () => invoke<Settings>("get_settings");
 export const saveSettings = (settings: Settings) => invoke<void>("save_settings", { settings });
-export const openSourcesWindow = () => invoke<void>("open_sources_window");
 export const checkFolderPattern = (pattern: string) =>
   invoke<void>("check_folder_pattern", { pattern });
 export const cancelJob = () => invoke<void>("cancel_job");
@@ -303,7 +304,7 @@ export const installTagModel = () => invoke<void>("install_tag_model");
 export const cancelTagInstall = () => invoke<void>("cancel_tag_install");
 export const startTagging = () => invoke<number>("start_tagging");
 export const cancelTagging = () => invoke<void>("cancel_tagging");
-export const listTags = () => invoke<Record<string, string[]>>("list_tags");
+export const listTags = () => invoke<Record<string, Sighting>>("list_tags");
 export const qualityModelStatus = () => invoke<TagModelStatus>("quality_model_status");
 export const installQualityModel = () => invoke<void>("install_quality_model");
 export const cancelQualityInstall = () => invoke<void>("cancel_quality_install");

@@ -62,14 +62,27 @@ export const config = {
     });
   },
 
+  before: async () => {
+    await browser.waitUntil(async () => (await $$("[role=treeitem], .placeholder")).length > 0, {
+      timeout: 180000,
+      timeoutMsg: "the app never finished starting",
+    });
+
+    let quiet = 0;
+    await browser.waitUntil(
+      async () => {
+        quiet = (await $$(".loading")).length === 0 ? quiet + 1 : 0;
+        return quiet >= 5;
+      },
+      { timeout: 180000, interval: 300, timeoutMsg: "the plan never settled" },
+    );
+  },
+
   afterSession: () => {
     closeTauriDriver();
   },
 };
 
-// WebView2 auto-updates independently of any standalone Edge browser, so the
-// driver version has to be read from the runtime that is actually installed
-// rather than assumed or hardcoded.
 function installedWebView2Version() {
   const key =
     "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";

@@ -68,6 +68,24 @@ export function moveSource(order: Provider[], from: Provider, to: Provider): Pro
   return next;
 }
 
+export function moveBy(order: Provider[], id: Provider, by: number): Provider[] {
+  const clean = listing(order);
+  const target = clean[clean.indexOf(id) + by];
+  return target === undefined ? clean : moveSource(clean, id, target);
+}
+
+export interface Span {
+  top: number;
+  bottom: number;
+}
+
+export function rowAt(rows: Span[], y: number): number {
+  if (rows.length === 0) return -1;
+  const under = rows.findIndex((row) => y >= row.top && y <= row.bottom);
+  if (under >= 0) return under;
+  return y < rows[0].top ? 0 : y > rows[rows.length - 1].bottom ? rows.length - 1 : -1;
+}
+
 export function enabledIn(order: Provider[], enabled: Provider[]): Provider[] {
   return listing(order).filter((id) => enabled.includes(id));
 }
@@ -84,19 +102,6 @@ export function clampWeight(weight: number): number {
 export function weightOf(weights: Weights, id: Provider): number {
   const held = weights[id];
   return held === undefined || !Number.isFinite(held) ? sourceOf(id).weight : clampWeight(held);
-}
-
-export function withWeight(weights: Weights, id: Provider, weight: number | null): Weights {
-  const next: Weights = {};
-  for (const source of SOURCES) {
-    if (weights[source.id] !== undefined) next[source.id] = clampWeight(weights[source.id]!);
-  }
-  if (weight === null) {
-    delete next[id];
-  } else {
-    next[id] = clampWeight(weight);
-  }
-  return next;
 }
 
 export function atDefaults(weights: Weights): boolean {

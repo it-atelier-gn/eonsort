@@ -2,10 +2,6 @@ describe("Charts view", () => {
   before(async () => {
     const charts = await $("button=Charts");
     await charts.click();
-    await browser.waitUntil(async () => (await $$(".loading")).length === 0, {
-      timeout: 180000,
-      timeoutMsg: "the plan never finished loading",
-    });
     await browser.waitUntil(async () => (await $$(".charts")).length > 0, {
       timeout: 60000,
       timeoutMsg: "the charts panel never mounted",
