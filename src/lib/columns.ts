@@ -12,7 +12,7 @@ export interface ColumnSet<Id extends string = string> {
 }
 
 export type TreeColumnId = "name" | "files" | "size";
-export type FileColumnId = "name" | "date" | "from" | "size" | "status";
+export type FileColumnId = "name" | "date" | "from" | "tags" | "rated" | "size" | "status";
 
 export const TREE_COLUMNS: ColumnSet<TreeColumnId> = {
   columns: [
@@ -29,6 +29,8 @@ export const FILE_COLUMNS: ColumnSet<FileColumnId> = {
     { id: "name", label: "Name", align: "left", stretch: true },
     { id: "date", label: "Date", align: "left" },
     { id: "from", label: "From", align: "left" },
+    { id: "tags", label: "Tags", align: "left" },
+    { id: "rated", label: "Rated", align: "right" },
     { id: "size", label: "Size", align: "right" },
     { id: "status", label: "Status", align: "right" },
   ],

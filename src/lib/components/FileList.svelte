@@ -1,6 +1,7 @@
 <script lang="ts">
   import { formatBytes, type EntryView } from "$lib/api";
   import { CONFIDENCE_LABEL, CONFIDENCE_TONE, hardFlags, isSuspect } from "$lib/dates";
+  import { labelOf } from "$lib/tags";
   import { nextRow } from "$lib/rows";
   import ColumnHead from "./ColumnHead.svelte";
   import {
@@ -47,6 +48,8 @@
       name: widths.name ?? 0,
       date: widths.date ?? widthOf(FILE_COLUMNS, "date", entries.map((entry) => entry.taken)),
       from: widths.from ?? widthOf(FILE_COLUMNS, "from", entries.map(provider)),
+      tags: widths.tags ?? widthOf(FILE_COLUMNS, "tags", entries.map(worn)),
+      rated: widths.rated ?? widthOf(FILE_COLUMNS, "rated", entries.map(rated)),
       size:
         widths.size ??
         widthOf(
@@ -75,6 +78,14 @@
 
   function provider(entry: EntryView): string {
     return entry.override_origin ? "you" : entry.provider;
+  }
+
+  function worn(entry: EntryView): string {
+    return entry.tags.map(labelOf).join(", ");
+  }
+
+  function rated(entry: EntryView): string {
+    return entry.quality == null ? "" : entry.quality.toFixed(1);
   }
 
   function dateTitle(entry: EntryView): string {
@@ -168,6 +179,14 @@
                 title={entry.provider_info ?? entry.provider}
               >
                 {provider(entry)}
+              </span>
+            {:else if id === "tags"}
+              <span class="cell truncate dim nowrap" role="gridcell" title={worn(entry)}>
+                {worn(entry)}
+              </span>
+            {:else if id === "rated"}
+              <span class="cell right mono nowrap dim" role="gridcell">
+                {rated(entry)}
               </span>
             {:else if id === "size"}
               <span class="cell right mono nowrap dim" role="gridcell">

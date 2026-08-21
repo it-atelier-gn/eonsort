@@ -131,7 +131,15 @@ describe("column widths", () => {
 
 describe("The columns over the file list", () => {
   it("starts with the name first and the rest behind it", () => {
-    expect(defaultOrder(FILE_COLUMNS)).toEqual(["name", "date", "from", "size", "status"]);
+    expect(defaultOrder(FILE_COLUMNS)).toEqual([
+      "name",
+      "date",
+      "from",
+      "tags",
+      "rated",
+      "size",
+      "status",
+    ]);
   });
 
   it("keeps its own order apart from the one over the tree", () => {
@@ -150,6 +158,8 @@ describe("The columns over the file list", () => {
       "name",
       "date",
       "from",
+      "tags",
+      "rated",
       "size",
     ]);
   });
@@ -160,10 +170,14 @@ describe("The columns over the file list", () => {
   });
 
   it("builds a grid template in the order given", () => {
-    const widths = { name: 0, date: 130, from: 90, size: 80, status: 110 };
-    expect(template(FILE_COLUMNS, ["date", "name", "from", "size", "status"], widths)).toBe(
-      "130px minmax(0, 1fr) 90px 80px 110px",
-    );
+    const widths = { name: 0, date: 130, from: 90, tags: 140, rated: 60, size: 80, status: 110 };
+    expect(
+      template(
+        FILE_COLUMNS,
+        ["date", "name", "from", "tags", "rated", "size", "status"],
+        widths,
+      ),
+    ).toBe("130px minmax(0, 1fr) 90px 140px 60px 80px 110px");
   });
 
   it("forgets a width that belongs to another table", () => {
