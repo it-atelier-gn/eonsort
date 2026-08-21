@@ -20,6 +20,9 @@ pub enum Error {
     #[error("serialization failed: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    #[error("the tag store: {0}")]
+    Store(#[from] rusqlite::Error),
+
     #[error("could not start the copy thread pool: {0}")]
     ThreadPool(String),
 

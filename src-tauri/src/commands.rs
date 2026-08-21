@@ -1236,10 +1236,10 @@ pub fn cancel_tagging(state: State<'_, AppState>) {
     state.tag_cancel.store(true, Ordering::Relaxed);
 }
 
-fn tag_store(app: &AppHandle) -> Option<PathBuf> {
+fn planned(app: &AppHandle) -> Option<PathBuf> {
     let state = app.state::<AppState>();
     let session = state.session.lock().unwrap();
-    session.plan_path.as_deref().map(tags::tags_path)
+    session.plan_path.as_deref().map(|plan| plan.to_path_buf())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1250,19 +1250,20 @@ pub struct SightingView {
 
 #[tauri::command]
 pub fn list_tags(app: AppHandle) -> Result<HashMap<String, SightingView>, String> {
-    let Some(path) = tag_store(&app) else {
+    let Some(path) = planned(&app) else {
         return Ok(HashMap::new());
     };
-    let stored = tags::read(&path).map_err(|e| e.to_string())?;
-    Ok(stored
-        .0
+    let store = tags::Store::beside(&path).map_err(|e| e.to_string())?;
+    Ok(store
+        .listing()
+        .map_err(|e| e.to_string())?
         .into_iter()
-        .map(|(source, sighting)| {
+        .map(|(source, tags, quality)| {
             (
                 source.to_string_lossy().into_owned(),
                 SightingView {
-                    tags: sighting.tags,
-                    quality: sighting.quality.filter(|score| score.is_finite()),
+                    tags,
+                    quality: quality.filter(|score| score.is_finite()),
                 },
             )
         })
@@ -1282,7 +1283,7 @@ pub fn start_tagging(app: AppHandle, state: State<'_, AppState>) -> Result<usize
 
     let rating = settings::load(&app).rate_quality && quality::installed(&dir);
 
-    let Some(store) = tag_store(&app) else {
+    let Some(store) = planned(&app) else {
         return Err("run a scan first".into());
     };
 
@@ -1342,13 +1343,14 @@ fn tag_everything(
     } else {
         None
     };
-    let mut stored = tags::read(store).map_err(|e| e.to_string())?;
-    stored.keep_only(&pictures);
+    let stored = tags::Store::beside(store).map_err(|e| e.to_string())?;
+    stored.keep_only(&pictures).map_err(|e| e.to_string())?;
 
     let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
     let total = pictures.len();
     let mut since_written = 0usize;
     let mut fresh: HashMap<String, SightingView> = HashMap::new();
+    let mut waiting: Vec<(PathBuf, tags::Sighting)> = Vec::new();
 
     for (seen, source) in pictures.into_iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
@@ -1356,7 +1358,7 @@ fn tag_everything(
         }
         let done = seen + 1;
 
-        if stored.get(&source).is_some() {
+        if stored.holds(&source).map_err(|e| e.to_string())? {
             continue;
         }
 
@@ -1388,37 +1390,41 @@ fn tag_everything(
                         quality: score,
                     },
                 );
-                stored.set(
+                waiting.push((
                     source,
                     tags::Sighting {
                         tags,
                         vector: seen.vector,
                         quality: score,
                     },
-                );
+                ));
                 since_written += 1;
             }
             Err(_) => continue,
         }
 
         if since_written >= TAG_BATCH {
-            tags::write(store, &stored).map_err(|e| e.to_string())?;
+            stored
+                .set_many(waiting.drain(..))
+                .map_err(|e| e.to_string())?;
             since_written = 0;
             let _ = app.emit("tags:seen", &fresh);
             fresh.clear();
         }
     }
 
-    tags::write(store, &stored).map_err(|e| e.to_string())?;
+    stored
+        .set_many(waiting.drain(..))
+        .map_err(|e| e.to_string())?;
     if !fresh.is_empty() {
         let _ = app.emit("tags:seen", &fresh);
     }
-    Ok(stored.len())
+    stored.len().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn search_pictures(app: AppHandle, words: String) -> Result<Vec<TagHit>, String> {
-    let Some(store) = tag_store(&app) else {
+    let Some(store) = planned(&app) else {
         return Ok(Vec::new());
     };
     if words.trim().is_empty() {
@@ -1428,7 +1434,7 @@ pub async fn search_pictures(app: AppHandle, words: String) -> Result<Vec<TagHit
     let dir = models_directory(&app)?;
 
     tauri::async_runtime::spawn_blocking(move || {
-        let stored = tags::read(&store).map_err(|e| e.to_string())?;
+        let stored = tags::Store::beside(&store).map_err(|e| e.to_string())?;
         let wanted = if cfg!(feature = "tagging") && tagging::installed(&dir) {
             tagging::Tagger::load(&dir)
                 .and_then(|tagger| tagger.phrase(&words))
@@ -1437,7 +1443,9 @@ pub async fn search_pictures(app: AppHandle, words: String) -> Result<Vec<TagHit
             Vec::new()
         };
 
-        Ok(tags::search(&stored, &wanted, &words)
+        Ok(stored
+            .search(&wanted, &words)
+            .map_err(|e| e.to_string())?
             .into_iter()
             .take(SEARCH_LIMIT)
             .map(|(source, score)| TagHit {
