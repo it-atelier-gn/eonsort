@@ -395,6 +395,8 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
+    overflow: hidden;
     background: var(--bg-panel);
     border-left: 1px solid var(--border);
   }
@@ -513,6 +515,7 @@
   .details {
     padding: 14px;
     flex: 1;
+    min-height: 0;
   }
 
   h2 {
