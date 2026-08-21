@@ -81,6 +81,6 @@ export function canTurn(entry: EntryView | null): boolean {
 
 export function describeRotation(entry: EntryView): string {
   if (entry.reencode) return `${describeTransform(entry.rotate)} by re-encoding it`;
-  if (entry.rotate_by_hand) return `you turned this — ${describeTransform(entry.rotate)}`;
-  return `turned upright from the tag — ${describeTransform(entry.rotate)}`;
+  if (entry.rotate_by_hand) return `you turned this, ${describeTransform(entry.rotate)}`;
+  return `turned upright from the tag, ${describeTransform(entry.rotate)}`;
 }

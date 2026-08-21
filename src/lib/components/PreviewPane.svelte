@@ -181,7 +181,7 @@
             −
           </button>
           <button
-            title="Zoom in — or hold Ctrl and turn the wheel"
+            title="Zoom in, or hold Ctrl and turn the wheel"
             aria-label="Zoom in"
             onclick={() => (zoom = steppedIn(zoom, boxOf()))}
           >
@@ -235,11 +235,11 @@
             </p>
             {#if !entry.reencode}
               <button class="ghost warn" disabled={busy} onclick={onReencode}>
-                Turn it anyway — re-encodes and drops the metadata
+                Turn it anyway. Re-encodes and drops the metadata
               </button>
             {/if}
           {:else if lossless === true}
-            <p class="faint note">Turns here cost nothing — the pixels are never re-encoded.</p>
+            <p class="faint note">Turns here cost nothing: the pixels are never re-encoded.</p>
           {/if}
 
           {#if entry.rotate_by_hand}

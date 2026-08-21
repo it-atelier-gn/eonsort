@@ -183,7 +183,7 @@ export function span(entries: EntryView[]): Span {
 }
 
 export function formatYear(epoch: number | null): string {
-  if (epoch === null) return "—";
+  if (epoch === null) return "?";
   return String(new Date(epoch * 1000).getUTCFullYear());
 }
 

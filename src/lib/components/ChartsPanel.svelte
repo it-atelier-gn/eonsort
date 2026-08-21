@@ -199,12 +199,12 @@
 
         <p class="note">
           <strong>Click a square to dig into it</strong>, drag across squares to take a range, or
-          click the label on the left for a whole row. Everything below — and the Timeline, Gallery
-          and Scene tabs — follows what you pick.
+          click the label on the left for a whole row. Everything below, and the Timeline, Gallery
+          and Scene tabs with it, follows what you pick.
         </p>
 
         <p class="note">
-          Look for <strong>gaps</strong> — a run of empty {CELL_UNIT[grid.level]} is either a stretch
+          Look for <strong>gaps</strong>. A run of empty {CELL_UNIT[grid.level]} is either a stretch
           when you took no pictures, or a batch whose dates went missing. A single square far from the
           rest is usually a wrong date: {grid.emptyCells} of the {grid.cellCount}
           {CELL_UNIT[grid.level]} in this range are empty.
@@ -227,7 +227,7 @@
             <span
               class="column"
               style:height="{(bar.files / hourTicks[hourTicks.length - 1]) * 100}%"
-              title="{String(bar.hour).padStart(2, '0')}:00 — {bar.files} {bar.files === 1
+              title="{String(bar.hour).padStart(2, '0')}:00, {bar.files} {bar.files === 1
                 ? 'file'
                 : 'files'}"
             ></span>
@@ -241,7 +241,7 @@
       <p class="note">
         A normal camera roll bulges through daylight hours. A <strong
           >spike at midnight</strong
-        > means those files carry a date with no time — typically read out of the file name — so they
+        > means those files carry a date with no time, typically read out of the file name, so they
         are placed by day, not by moment. Here that is {midnightPercent}% of the files.
       </p>
     </figure>

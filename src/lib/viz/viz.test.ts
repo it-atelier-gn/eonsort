@@ -354,7 +354,7 @@ describe("charts", () => {
 
   it("describes an empty plan without dividing by zero", () => {
     expect(span([])).toEqual({ first: null, last: null, years: 0 });
-    expect(formatYear(null)).toBe("—");
+    expect(formatYear(null)).toBe("?");
     expect(providerCounts([])).toEqual([]);
   });
 

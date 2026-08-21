@@ -792,7 +792,7 @@ fn refuse_if_copied(
     match journal.get(source) {
         Some(Outcome::Failed { .. }) | None => Ok(()),
         Some(_) => Err(format!(
-            "{} has already been copied — re-dating it would leave the copy behind",
+            "{} has already been copied, so re-dating it would leave the copy behind",
             display(source)
         )),
     }

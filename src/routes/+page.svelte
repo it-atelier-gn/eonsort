@@ -410,7 +410,7 @@
         return;
       }
       if (!status.present) {
-        tagNote = "The tagging model is not downloaded yet — get it in the setup panel.";
+        tagNote = "The tagging model is not downloaded yet. Get it in the setup panel.";
         return;
       }
       tagging = true;
@@ -729,7 +729,7 @@
             {summary.files} files · {formatBytes(summary.bytes)} ·
             {summary.destination
               ? `into ${summary.destination}`
-              : "no destination yet — pick one to copy"}
+              : "no destination yet, pick one to copy"}
           </p>
         {:else}
           <p class="faint">Pick your folders, scan, review, then copy.</p>
@@ -788,7 +788,7 @@
       {#if tagProgress}
         <span class="spinner"></span>
         <span>
-          Looking at pictures — {tagProgress.done.toLocaleString()} of {tagProgress.total.toLocaleString()}
+          Looking at pictures: {tagProgress.done.toLocaleString()} of {tagProgress.total.toLocaleString()}
           ({tagShare}%)
         </span>
         <div class="bar thin">
@@ -1004,7 +1004,7 @@
       {:else if verifyProgress}
         Checking {verifyProgress.checked} of {verifyProgress.total}
       {:else if tagProgress}
-        Looking at pictures — {tagProgress.done.toLocaleString()} of {tagProgress.total.toLocaleString()}
+        Looking at pictures: {tagProgress.done.toLocaleString()} of {tagProgress.total.toLocaleString()}
       {:else if error}
         <span class="error">{error}</span>
       {:else if notice}
