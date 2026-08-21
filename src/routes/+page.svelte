@@ -78,18 +78,16 @@
   import ChartsPanel from "$lib/components/ChartsPanel.svelte";
   import GalleryView from "$lib/components/GalleryView.svelte";
   import RingsView from "$lib/components/RingsView.svelte";
-  import ScopeBar from "$lib/components/ScopeBar.svelte";
+  import FilterBar from "$lib/components/FilterBar.svelte";
   import {
     keepsQuality,
     keepsTags,
     merged,
-    pickedLabel,
     tagCounts,
     type Sighting,
     MIN_QUALITY,
     UNTAGGED,
   } from "$lib/tags";
-  import TagFilter from "$lib/components/TagFilter.svelte";
   import { filterRange, sameRange, type TimeRange } from "$lib/viz/range";
 
   type Job = "scan" | "copy" | "verify";
@@ -251,7 +249,6 @@
           .map((hit) => taggedEntries.find((entry) => entry.source === hit.source))
           .filter((entry): entry is EntryView => entry !== undefined),
   );
-  const narrowed = $derived(pickedTags !== null || leastQuality > MIN_QUALITY);
   const foundEntries = $derived(
     searchedEntries.filter(
       (entry) => keepsTags(entry.tags, pickedTags) && keepsQuality(entry.quality, leastQuality),
@@ -289,11 +286,7 @@
 
   function drill(next: TimeRange) {
     if (sameRange(next, scope)) return;
-    scopes = [...scopes, next];
-  }
-
-  function popScope(depth: number) {
-    scopes = scopes.slice(0, Math.max(0, depth));
+    scopes = [next];
   }
 
   let unlisteners: UnlistenFn[] = [];
@@ -753,16 +746,6 @@
         <button class:active={view === "rings"} onclick={() => showAll("rings")}>Rings</button>
       </div>
       <div class="look">
-        {#if anyTagged}
-          <TagFilter
-            {counts}
-            picked={pickedTags}
-            least={leastQuality}
-            rated={anyRated}
-            onPick={(next) => (pickedTags = next)}
-            onRate={(next) => (leastQuality = next)}
-          />
-        {/if}
         <input
           type="search"
           placeholder="Search the pictures"
@@ -788,7 +771,7 @@
     </div>
   </header>
 
-  {#if tagProgress || tagNote || hits !== null || narrowed}
+  {#if tagProgress || tagNote || hits !== null}
     <div class="tagbar faint tiny">
       {#if tagProgress}
         <span class="spinner"></span>
@@ -809,35 +792,24 @@
         <span>{hits.length.toLocaleString()} pictures match &ldquo;{query.trim()}&rdquo;</span>
         <button class="ghost" onclick={clearSearch}>Show all again</button>
       {/if}
-      {#if narrowed}
-        <span>
-          {foundEntries.length.toLocaleString()} of {searchedEntries.length.toLocaleString()} pictures
-          left by {pickedLabel(pickedTags, counts).toLowerCase()}{leastQuality > MIN_QUALITY
-            ? `, rated ${leastQuality.toFixed(1)} and up`
-            : ""}
-        </span>
-        <button
-          class="ghost"
-          onclick={() => {
-            pickedTags = null;
-            leastQuality = MIN_QUALITY;
-          }}
-        >
-          Every picture again
-        </button>
-      {/if}
       {#if tagNote}
         <span>{tagNote}</span>
       {/if}
     </div>
   {/if}
 
-  {#if scopes.length > 0}
-    <ScopeBar
-      {scopes}
+  {#if timelineEntries.length > 0}
+    <FilterBar
+      range={scope}
+      counts={anyTagged ? counts : []}
+      picked={pickedTags}
+      least={leastQuality}
+      rated={anyRated}
       shown={scopedEntries.length}
       total={timelineEntries.length}
-      onPop={popScope}
+      onRange={(next) => (scopes = next === null ? [] : [next])}
+      onPick={(next) => (pickedTags = next)}
+      onRate={(next) => (leastQuality = next)}
     />
   {/if}
 

@@ -41,6 +41,10 @@ import {
   levelFor,
   planRange,
   rangeLabel,
+  rangeOfDays,
+  DAWN,
+  DOOMSDAY,
+  dayValue,
   sameRange,
   selectionRange,
 } from "./range";
@@ -723,5 +727,38 @@ describe("pick ids", () => {
 
   it("reads the cleared background as nothing", () => {
     expect(decodeId(new Uint8Array([0, 0, 0, 255]))).toBe(-1);
+  });
+});
+
+describe("Naming a range in days", () => {
+  it("writes an instant as the day it falls on", () => {
+    expect(dayValue(Date.parse("2024-03-11T14:22:00Z") / 1000)).toBe("2024-03-11");
+  });
+
+  it("takes two days and keeps the last one whole", () => {
+    const range = rangeOfDays("2024-03-11", "2024-03-12");
+    expect(dayValue(range!.from)).toBe("2024-03-11");
+    expect(range!.to - range!.from).toBe(2 * 86400);
+  });
+
+  it("leaves the far end open when only one day is given", () => {
+    const onwards = rangeOfDays("2024-03-11", "")!;
+    expect(dayValue(onwards.from)).toBe("2024-03-11");
+    expect(onwards.to).toBe(DOOMSDAY);
+
+    const until = rangeOfDays("", "2024-03-11")!;
+    expect(until.from).toBe(DAWN);
+    expect(dayValue(until.to - 1)).toBe("2024-03-11");
+  });
+
+  it("has no range to give when neither end is a day", () => {
+    expect(rangeOfDays("", "")).toBe(null);
+    expect(rangeOfDays("not a day", "")).toBe(null);
+  });
+
+  it("turns a backwards pair into the day it starts on", () => {
+    const range = rangeOfDays("2024-03-11", "2024-03-01")!;
+    expect(dayValue(range.from)).toBe("2024-03-11");
+    expect(range.to - range.from).toBe(86400);
   });
 });

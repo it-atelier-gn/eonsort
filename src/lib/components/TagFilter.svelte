@@ -1,25 +1,13 @@
 <script lang="ts">
-  import {
-    allPicked,
-    labelOf,
-    matching,
-    pickedLabel,
-    withTag,
-    type TagCount,
-    MAX_QUALITY,
-    MIN_QUALITY,
-  } from "$lib/tags";
+  import { allPicked, labelOf, matching, pickedLabel, withTag, type TagCount } from "$lib/tags";
 
   interface Props {
     counts: TagCount[];
     picked: string[] | null;
-    least: number;
-    rated: boolean;
     onPick: (picked: string[] | null) => void;
-    onRate: (least: number) => void;
   }
 
-  let { counts, picked, least, rated, onPick, onRate }: Props = $props();
+  let { counts, picked, onPick }: Props = $props();
 
   let open = $state(false);
   let needle = $state("");
@@ -44,12 +32,12 @@
 
 <div class="filter" bind:this={panel}>
   <button
-    class:narrowed={!every || least > MIN_QUALITY}
+    class:narrowed={!every}
     aria-expanded={open}
     title="Show only the pictures you tick"
     onclick={() => (open = !open)}
   >
-    {label}{least > MIN_QUALITY ? ` · ${least.toFixed(1)}+` : ""} ▾
+    {label} ▾
   </button>
 
   {#if open}
@@ -89,33 +77,6 @@
           </p>
         {/each}
       </div>
-
-      {#if rated}
-        <div class="rating">
-          <div class="both">
-            <span class="faint tiny">Rated at least</span>
-            <span class="tiny score">
-              {least > MIN_QUALITY ? least.toFixed(1) : "any"}
-            </span>
-            <button
-              class="ghost"
-              onclick={() => onRate(MIN_QUALITY)}
-              disabled={least <= MIN_QUALITY}
-            >
-              Clear
-            </button>
-          </div>
-          <input
-            type="range"
-            min={MIN_QUALITY}
-            max={MAX_QUALITY}
-            step="0.1"
-            value={least}
-            aria-label="Lowest rating to show"
-            oninput={(e) => onRate(e.currentTarget.valueAsNumber)}
-          />
-        </div>
-      {/if}
     </div>
   {/if}
 </div>
@@ -199,20 +160,4 @@
     margin: 6px 4px;
   }
 
-  .rating {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding-top: 6px;
-    border-top: 1px solid var(--border);
-  }
-
-  .rating input[type="range"] {
-    width: 100%;
-  }
-
-  .score {
-    font-variant-numeric: tabular-nums;
-    color: var(--accent);
-  }
 </style>

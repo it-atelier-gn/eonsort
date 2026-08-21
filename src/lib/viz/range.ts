@@ -52,6 +52,25 @@ export function filterRange(entries: EntryView[], range: TimeRange | null): Entr
   return entries.filter((entry) => inRange(entry, range));
 }
 
+export function dayValue(epoch: number): string {
+  return new Date(epoch * 1000).toISOString().slice(0, 10);
+}
+
+export const DAWN = -62135596800;
+export const DOOMSDAY = 253402300800;
+
+export function rangeOfDays(from: string, to: string): TimeRange | null {
+  const start = Date.parse(`${from}T00:00:00Z`);
+  const end = Date.parse(`${to}T00:00:00Z`);
+  const opens = Number.isNaN(start) ? null : start / 1000;
+  const closes = Number.isNaN(end) ? null : end / 1000 + DAY;
+
+  if (opens === null && closes === null) return null;
+  const first = opens ?? DAWN;
+  const last = closes ?? DOOMSDAY;
+  return last <= first ? { from: first, to: first + DAY } : { from: first, to: last };
+}
+
 export function levelFor(range: TimeRange): GridLevel {
   const days = (range.to - range.from) / DAY;
   if (days > 366) return "years";
