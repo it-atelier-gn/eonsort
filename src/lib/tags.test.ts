@@ -37,7 +37,18 @@ describe("Counting the tags a plan carries", () => {
 
   it("gives the untagged pile a name of its own", () => {
     expect(labelOf(UNTAGGED)).toBe(UNTAGGED_LABEL);
-    expect(labelOf("a dog")).toBe("a dog");
+  });
+
+  it("shows a tag without the article the model was asked with", () => {
+    expect(labelOf("a dog")).toBe("dog");
+    expect(labelOf("an aeroplane")).toBe("aeroplane");
+    expect(labelOf("the sea")).toBe("sea");
+    expect(labelOf("a field or meadow")).toBe("field or meadow");
+  });
+
+  it("leaves a tag that is only an article alone", () => {
+    expect(labelOf("a")).toBe("a");
+    expect(labelOf("birthday party")).toBe("birthday party");
   });
 
   it("has nothing to count in an empty plan", () => {
@@ -110,7 +121,7 @@ describe("Ticking the tags", () => {
   it("says in one line what the filter is holding", () => {
     expect(pickedLabel(null, counts)).toBe("All tags");
     expect(pickedLabel([], counts)).toBe("No tag");
-    expect(pickedLabel(["a dog"], counts)).toBe("a dog");
+    expect(pickedLabel(["a dog"], counts)).toBe("dog");
     expect(pickedLabel([UNTAGGED], counts)).toBe(UNTAGGED_LABEL);
     expect(pickedLabel(["a dog", "a beach"], counts)).toBe("2 tags");
   });

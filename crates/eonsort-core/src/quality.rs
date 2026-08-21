@@ -21,17 +21,10 @@ pub const DEVIATION: [f32; 3] = [0.268_629_54, 0.261_302_6, 0.275_777_1];
 
 pub const GOOD: f32 = 5.5;
 pub const BEAUTIFUL: f32 = 6.2;
-pub const GOOD_TAG: &str = "a good picture";
-pub const BEAUTIFUL_TAG: &str = "a beautiful picture";
+pub const RETIRED_TAGS: [&str; 2] = ["a good picture", "a beautiful picture"];
 
-pub fn tags_for(score: f32) -> Vec<String> {
-    if score >= BEAUTIFUL {
-        vec![BEAUTIFUL_TAG.to_string(), GOOD_TAG.to_string()]
-    } else if score >= GOOD {
-        vec![GOOD_TAG.to_string()]
-    } else {
-        Vec::new()
-    }
+pub fn was_a_rating(tag: &str) -> bool {
+    RETIRED_TAGS.contains(&tag)
 }
 
 pub fn path_of(dir: &Path, weight: &Weight) -> PathBuf {
@@ -226,14 +219,10 @@ mod tests {
     }
 
     #[test]
-    fn a_dull_picture_earns_no_tag_and_a_lovely_one_earns_both() {
-        assert!(tags_for(3.0).is_empty());
-        assert_eq!(tags_for(GOOD), vec![GOOD_TAG.to_string()]);
-        assert_eq!(
-            tags_for(9.0),
-            vec![BEAUTIFUL_TAG.to_string(), GOOD_TAG.to_string()]
-        );
-        assert!(tags_for(f32::NAN).is_empty());
+    fn the_ratings_that_used_to_be_tags_are_known_by_name() {
+        assert!(was_a_rating("a good picture"));
+        assert!(was_a_rating("a beautiful picture"));
+        assert!(!was_a_rating("a dog"));
     }
 
     #[test]

@@ -8,6 +8,7 @@
     type Preview,
   } from "$lib/api";
   import { CONFIDENCE_LABEL, CONFIDENCE_TONE, fromInputValue, toInputValue } from "$lib/dates";
+  import { labelOf } from "$lib/tags";
   import { TRANSFORM_CSS, canTurn, describeRotation, swapsAxes } from "$lib/rotate";
   import {
     isResting,
@@ -317,7 +318,23 @@
 
         {#if entry.subject || entry.tags.length > 0}
           <dt>Tags</dt>
-          <dd>{[entry.subject, ...entry.tags].filter(Boolean).join(" · ")}</dd>
+          <dd class="chips">
+            {#if entry.subject}
+              <span class="chip subject">{entry.subject}</span>
+            {/if}
+            {#each entry.tags as tag (tag)}
+              <span class="chip" title={tag}>{labelOf(tag)}</span>
+            {/each}
+          </dd>
+        {/if}
+
+        {#if entry.quality != null}
+          <dt>Rated</dt>
+          <dd class="chips">
+            <span class="chip rated" title="How the model scored this picture, 1 to 10">
+              {entry.quality.toFixed(1)}
+            </span>
+          </dd>
         {/if}
 
         <dt>Size</dt>
@@ -347,6 +364,33 @@
 </aside>
 
 <style>
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: var(--bg-raised);
+    font-size: 11px;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+
+  .chip.subject {
+    border-color: var(--accent-dim);
+    color: var(--accent);
+  }
+
+  .chip.rated {
+    font-variant-numeric: tabular-nums;
+  }
+
   .pane {
     display: flex;
     flex-direction: column;

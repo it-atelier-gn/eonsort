@@ -1262,7 +1262,10 @@ pub fn list_tags(app: AppHandle) -> Result<HashMap<String, SightingView>, String
             (
                 source.to_string_lossy().into_owned(),
                 SightingView {
-                    tags,
+                    tags: tags
+                        .into_iter()
+                        .filter(|tag| !quality::was_a_rating(tag))
+                        .collect(),
                     quality: quality.filter(|score| score.is_finite()),
                 },
             )
@@ -1379,10 +1382,7 @@ fn tag_everything(
                     .as_ref()
                     .and_then(|rater| rater.score(&source).ok())
                     .filter(|score| score.is_finite());
-                let mut tags = seen.tags;
-                if let Some(score) = score {
-                    tags.extend(quality::tags_for(score));
-                }
+                let tags = seen.tags;
                 fresh.insert(
                     source.to_string_lossy().into_owned(),
                     SightingView {
