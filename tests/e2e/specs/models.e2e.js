@@ -71,7 +71,7 @@ describe("The models behind tagging", () => {
     if (tagging.built_in) return;
 
     expect(await rejection("install_tag_model", {})).toMatch(/without the tagging model/i);
-    expect(await rejection("start_tagging", {})).toMatch(/without the tagging model/i);
+    expect(await rejection("start_tagging", { afresh: false })).toMatch(/without the tagging model/i);
     expect(await rejection("install_quality_model", {})).toMatch(/without the quality model/i);
   });
 

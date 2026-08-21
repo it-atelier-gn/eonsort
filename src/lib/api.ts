@@ -302,7 +302,7 @@ export interface TagHit {
 export const tagModelStatus = () => invoke<TagModelStatus>("tag_model_status");
 export const installTagModel = () => invoke<void>("install_tag_model");
 export const cancelTagInstall = () => invoke<void>("cancel_tag_install");
-export const startTagging = () => invoke<number>("start_tagging");
+export const startTagging = (afresh = false) => invoke<number>("start_tagging", { afresh });
 export const cancelTagging = () => invoke<void>("cancel_tagging");
 export const listTags = () => invoke<Record<string, Sighting>>("list_tags");
 export const qualityModelStatus = () => invoke<TagModelStatus>("quality_model_status");

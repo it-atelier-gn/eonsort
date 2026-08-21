@@ -28,6 +28,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(60);
 const TAG_BATCH: usize = 40;
+const HANDOVER: Duration = Duration::from_secs(90);
 const SEARCH_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1231,6 +1232,23 @@ pub fn cancel_tag_install(state: State<'_, AppState>) {
     state.tag_cancel.store(true, Ordering::Relaxed);
 }
 
+fn take_the_look(state: &State<'_, AppState>) -> bool {
+    let waited = Instant::now();
+    loop {
+        {
+            let mut running = state.tagging.lock().unwrap();
+            if !*running {
+                *running = true;
+                return true;
+            }
+        }
+        if waited.elapsed() > HANDOVER {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 #[tauri::command]
 pub fn cancel_tagging(state: State<'_, AppState>) {
     state.tag_cancel.store(true, Ordering::Relaxed);
@@ -1274,7 +1292,11 @@ pub fn list_tags(app: AppHandle) -> Result<HashMap<String, SightingView>, String
 }
 
 #[tauri::command]
-pub fn start_tagging(app: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
+pub fn start_tagging(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    afresh: bool,
+) -> Result<usize, String> {
     if !cfg!(feature = "tagging") {
         return Err("this build was made without the tagging model".into());
     }
@@ -1302,20 +1324,26 @@ pub fn start_tagging(app: AppHandle, state: State<'_, AppState>) -> Result<usize
             .collect()
     };
 
-    {
-        let mut running = state.tagging.lock().unwrap();
-        if *running {
-            return Err("the pictures are already being looked at".into());
-        }
-        *running = true;
-    }
-
-    state.tag_cancel.store(false, Ordering::Relaxed);
+    state.tag_cancel.store(true, Ordering::Relaxed);
     let handle = app.clone();
     let wanted = pictures.len();
 
     std::thread::spawn(move || {
         let state = handle.state::<AppState>();
+        if !take_the_look(&state) {
+            let _ = handle.emit("tags:error", "the last look at the pictures has not stopped yet");
+            return;
+        }
+
+        state.tag_cancel.store(false, Ordering::Relaxed);
+        if afresh {
+            if let Err(err) = tags::Store::beside(&store).and_then(|held| held.forget_all()) {
+                *state.tagging.lock().unwrap() = false;
+                let _ = handle.emit("tags:error", err.to_string());
+                return;
+            }
+        }
+
         let result = tag_everything(&handle, &dir, &store, pictures, rating, &state.tag_cancel);
         *state.tagging.lock().unwrap() = false;
 

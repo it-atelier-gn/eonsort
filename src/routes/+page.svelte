@@ -399,7 +399,7 @@
     }
   }
 
-  async function beginTagging() {
+  async function beginTagging(afresh = false) {
     tagNote = null;
     try {
       const status = await tagModelStatus();
@@ -412,7 +412,7 @@
         return;
       }
       tagging = true;
-      await startTagging();
+      await startTagging(afresh);
     } catch (e) {
       tagging = false;
       tagNote = String(e);
@@ -815,7 +815,17 @@
 
   {#if settings}
     <main class:wide={view !== "folders"}>
-      <SetupPanel {settings} {busy} {patternError} onChange={updateSettings} />
+      <SetupPanel
+        {settings}
+        {busy}
+        {patternError}
+        {tagging}
+        looked={Object.keys(tagsBySource).length}
+        pictures={timelineEntries.length > 0}
+        onChange={updateSettings}
+        onTag={(afresh) => void beginTagging(afresh)}
+        onStopTagging={() => void cancelTagging()}
+      />
 
       {#if loadingAll}
         <div class="loading faint">

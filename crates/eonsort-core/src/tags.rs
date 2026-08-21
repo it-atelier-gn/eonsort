@@ -265,6 +265,14 @@ impl Store {
         Ok(counted)
     }
 
+    pub fn forget_all(&self) -> Result<usize> {
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        let gone = self.conn.execute("DELETE FROM sighting", [])?;
+        self.conn.execute("DELETE FROM worn", [])?;
+        self.conn.execute("COMMIT", [])?;
+        Ok(gone)
+    }
+
     pub fn listing(&self) -> Result<Vec<Listed>> {
         let mut query = self
             .conn
@@ -572,6 +580,21 @@ mod tests {
         let store = store();
         assert!(store.take_in(&sidecar).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn forgetting_everything_leaves_the_store_ready_to_look_again() {
+        let store = store();
+        put(&store, "/a.jpg", sighting(&["a dog"], vec![1.0]));
+        put(&store, "/b.jpg", sighting(&["a beach"], vec![0.0]));
+
+        assert_eq!(store.forget_all().unwrap(), 2);
+        assert!(store.is_empty().unwrap());
+        assert!(store.counts().unwrap().is_empty());
+        assert!(!store.holds(Path::new("/a.jpg")).unwrap());
+
+        put(&store, "/a.jpg", sighting(&["a wolf"], vec![1.0]));
+        assert_eq!(store.len().unwrap(), 1);
     }
 
     #[test]
