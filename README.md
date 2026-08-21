@@ -11,13 +11,13 @@ tool last touched them.
 Point it at your photo folders, press **Scan**, and you get the full resulting tree as a preview
 before a byte is copied. Then press **Copy files**. Sources are only ever read.
 
-Windows, Linux and macOS — desktop app and `eonsort` command line tool.
+Windows, Linux and macOS. Desktop app and `eonsort` command line tool.
 
 ![Eonsort desktop app](docs/screenshot.png)
 
 Seven independent date sources, cross-checked; camera-clock resets and other wrong dates flagged and
-correctable by hand; pictures turned upright, duplicates found, and — optionally — tagged and rated
-by two models running locally on the CPU.
+correctable by hand; pictures turned upright, duplicates found, and optionally tagged and rated by
+two models running locally on the CPU.
 **[What it does, in full →](https://it-atelier-gn.github.io/eonsort/)**
 
 ---
@@ -111,8 +111,8 @@ The application icon is generated. To change it, edit `scripts/make-icon.mjs` an
 ### End-to-end UI tests
 
 `tests/e2e` drives the actual desktop window through [WebdriverIO](https://webdriver.io/) and
-[`tauri-driver`](https://crates.io/crates/tauri-driver). Windows and Linux only — `tauri-driver` has
-no macOS WebDriver backend.
+[`tauri-driver`](https://crates.io/crates/tauri-driver). Windows and Linux only, because
+`tauri-driver` has no macOS WebDriver backend.
 
 ```sh
 cargo install tauri-driver --locked
@@ -122,7 +122,7 @@ npm run test:e2e
 On Windows the matching Edge WebDriver downloads automatically. On Linux, install
 `webkit2gtk-driver` (or your distro's equivalent) so `WebKitWebDriver` is on `PATH`.
 
-**Close any running eonsort window first** — the rebuild cannot replace a locked `.exe`, and the
+**Close any running eonsort window first.** The rebuild cannot replace a locked `.exe`, and the
 suite will then quietly run the previous binary and pass without testing your changes.
 
 ---
