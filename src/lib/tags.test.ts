@@ -5,6 +5,7 @@ import {
   keepsTags,
   labelOf,
   matching,
+  merged,
   pickedLabel,
   tagCounts,
   withTag,
@@ -128,5 +129,30 @@ describe("Finding a tag in a long list", () => {
 
   it("finds the untagged pile by its name", () => {
     expect(matching(counts, "untag").map((count) => count.tag)).toEqual([UNTAGGED]);
+  });
+});
+
+describe("Taking in what a tagging pass has just seen", () => {
+  const held = { "a.jpg": { tags: ["a dog"], quality: 5.1 } };
+
+  it("adds the pictures of a batch to the ones already known", () => {
+    const next = merged(held, { "b.jpg": { tags: ["a beach"], quality: null } });
+    expect(Object.keys(next).sort()).toEqual(["a.jpg", "b.jpg"]);
+    expect(next["a.jpg"]).toEqual(held["a.jpg"]);
+  });
+
+  it("lets a later sighting of the same picture win", () => {
+    const next = merged(held, { "a.jpg": { tags: ["a wolf"], quality: 6.6 } });
+    expect(next["a.jpg"]).toEqual({ tags: ["a wolf"], quality: 6.6 });
+  });
+
+  it("leaves what it holds alone", () => {
+    const next = merged(held, { "b.jpg": { tags: [], quality: null } });
+    expect(held).toEqual({ "a.jpg": { tags: ["a dog"], quality: 5.1 } });
+    expect(next).not.toBe(held);
+  });
+
+  it("hands back the same object when a batch is empty", () => {
+    expect(merged(held, {})).toBe(held);
   });
 });

@@ -1348,6 +1348,7 @@ fn tag_everything(
     let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
     let total = pictures.len();
     let mut since_written = 0usize;
+    let mut fresh: HashMap<String, SightingView> = HashMap::new();
 
     for (seen, source) in pictures.into_iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
@@ -1380,6 +1381,13 @@ fn tag_everything(
                 if let Some(score) = score {
                     tags.extend(quality::tags_for(score));
                 }
+                fresh.insert(
+                    source.to_string_lossy().into_owned(),
+                    SightingView {
+                        tags: tags.clone(),
+                        quality: score,
+                    },
+                );
                 stored.set(
                     source,
                     tags::Sighting {
@@ -1396,10 +1404,15 @@ fn tag_everything(
         if since_written >= TAG_BATCH {
             tags::write(store, &stored).map_err(|e| e.to_string())?;
             since_written = 0;
+            let _ = app.emit("tags:seen", &fresh);
+            fresh.clear();
         }
     }
 
     tags::write(store, &stored).map_err(|e| e.to_string())?;
+    if !fresh.is_empty() {
+        let _ = app.emit("tags:seen", &fresh);
+    }
     Ok(stored.len())
 }
 

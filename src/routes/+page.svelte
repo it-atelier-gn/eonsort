@@ -82,6 +82,7 @@
   import {
     keepsQuality,
     keepsTags,
+    merged,
     pickedLabel,
     tagCounts,
     type Sighting,
@@ -314,6 +315,10 @@
       }),
       listen<string>("scan:error", (e) => fail(e.payload)),
       listen<TagProgress>("tags:progress", (e) => (tagProgress = e.payload)),
+      listen<Record<string, Sighting>>(
+        "tags:seen",
+        (e) => (tagsBySource = merged(tagsBySource, e.payload)),
+      ),
       listen<number>("tags:done", async () => {
         tagProgress = null;
         tagging = false;
