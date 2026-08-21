@@ -439,33 +439,6 @@
         <p class="hint error">{tagError}</p>
       {/if}
 
-      {#if tagModel?.present}
-        <div class="look-line">
-          {#if tagging}
-            <button class="ghost" onclick={onStopTagging}>Stop looking</button>
-          {:else}
-            <button disabled={!pictures} onclick={() => onTag(false)}>
-              {looked > 0 ? "Look at the rest" : "Look at the pictures"}
-            </button>
-            {#if looked > 0}
-              <button
-                class="ghost"
-                disabled={!pictures}
-                onclick={() => onTag(true)}
-                title="Forget what is known and look at every picture again"
-              >
-                Look again at all
-              </button>
-            {/if}
-          {/if}
-        </div>
-        <p class="faint hint">
-          {pictures
-            ? `${looked.toLocaleString()} pictures looked at so far.`
-            : "Scan first, then the pictures can be looked at."}
-        </p>
-      {/if}
-
       <label class="check">
         <input
           type="checkbox"
@@ -510,6 +483,33 @@
         {/if}
       {/if}
     {/if}
+    {#if tagModel?.present}
+      <div class="look-line">
+        {#if tagging}
+          <button class="ghost" onclick={onStopTagging}>Stop looking</button>
+        {:else}
+          <button disabled={!pictures} onclick={() => onTag(false)}>
+            {looked > 0 ? "Look at the rest" : "Look at the pictures"}
+          </button>
+          {#if looked > 0}
+            <button
+              class="ghost"
+              disabled={!pictures}
+              onclick={() => onTag(true)}
+              title="Forget what is known and look at every picture again"
+            >
+              Look again at all
+            </button>
+          {/if}
+        {/if}
+      </div>
+      <p class="faint hint">
+        {pictures
+          ? `${looked.toLocaleString()} pictures looked at so far.`
+          : "Scan first, then the pictures can be looked at."}
+      </p>
+    {/if}
+
     <label class="check">
       <input
         type="checkbox"

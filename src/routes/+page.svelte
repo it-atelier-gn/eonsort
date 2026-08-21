@@ -113,6 +113,7 @@
       : 0,
   );
   let tagging = $state(false);
+  let canLook = $state(false);
   let tagNote = $state<string | null>(null);
   let tagsBySource = $state<Record<string, Sighting>>({});
   let pickedTags = $state<string[] | null>(null);
@@ -294,6 +295,7 @@
   onMount(async () => {
     settings = await getSettings();
     version = await appVersion();
+    await refreshLooking();
 
     unlisteners = await Promise.all([
       listen<Settings>("settings:changed", (e) => (settings = e.payload)),
@@ -304,6 +306,7 @@
         summary = e.payload;
         notice = `Planned ${e.payload.files} files into ${e.payload.folders} folders.`;
         await refreshTree(true);
+        await refreshLooking();
         if (settings?.tag_pictures) void beginTagging();
       }),
       listen<string>("scan:error", (e) => fail(e.payload)),
@@ -316,6 +319,7 @@
         tagProgress = null;
         tagging = false;
         await refreshTags();
+        await refreshLooking();
       }),
       listen<string>("tags:error", (e) => {
         tagProgress = null;
@@ -416,6 +420,15 @@
     } catch (e) {
       tagging = false;
       tagNote = String(e);
+    }
+  }
+
+  async function refreshLooking() {
+    try {
+      const status = await tagModelStatus();
+      canLook = status.built_in && status.present;
+    } catch {
+      canLook = false;
     }
   }
 
@@ -765,6 +778,19 @@
       <button class="primary" onclick={scan} disabled={!canScan}>Scan</button>
       <button onclick={copy} disabled={!canRun} title={runHint}>Copy files</button>
       <button onclick={check} disabled={!canRun} title={runHint}>Check result</button>
+      {#if canLook}
+        {#if tagging}
+          <button class="ghost" onclick={() => void cancelTagging()}>Stop looking</button>
+        {:else}
+          <button
+            onclick={() => void beginTagging(false)}
+            disabled={busy || timelineEntries.length === 0}
+            title="Look at the pictures and tag them, carrying on where the last look stopped"
+          >
+            Look at pictures
+          </button>
+        {/if}
+      {/if}
       {#if busy}
         <button class="danger" onclick={() => cancelJob()}>Stop</button>
       {/if}
