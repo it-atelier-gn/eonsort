@@ -1,0 +1,1943 @@
+<script lang="ts">
+  import { onDestroy, onMount } from "svelte";
+  import { dev } from "$app/environment";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+  import {
+    baseName,
+    cancelJob,
+    checkFolderPattern,
+    clearDateOverride,
+    clearRotation,
+    formatBytes,
+    getSettings,
+    cancelTagging,
+    cancelFaceHunt,
+    faceStatus,
+    listAllEntries,
+    listFaces,
+    listNames,
+    listTags,
+    nameFace,
+    saveScreenshot,
+    searchPictures,
+    startFaceHunt,
+    startTagging,
+    tagModelStatus,
+    type NameCount,
+    type Spot,
+  } from "$lib/api";
+  import { BOXES_KEY, countFaces, showBoxes, tally, wearingAll } from "$lib/faces";
+  import {
+    listFolders,
+    listSkipped,
+    listSuspects,
+    openPlan,
+    previewFile,
+    reproviderCluster,
+    rotateMarked,
+    saveSettings,
+    setDateOverride,
+    setRotation,
+    shiftDates,
+    turnRotation,
+    picturesLike,
+    planOffsets,
+    startCopy,
+    setDestination,
+    startScan,
+    startVerify,
+    findBursts,
+    findLookalikes,
+    findDuplicates,
+    removeExtraCopies,
+    type BurstView,
+    type LookalikeView,
+    type CopyProgress,
+    type CopyReport,
+    type DuplicateReport,
+    type DateChoice,
+    type EntryView,
+    type OffsetView,
+    type FolderNode,
+    type PlanSummary,
+    type Preview,
+    type Provider,
+    type TagHit,
+    type TagProgress,
+    type ScanProgress,
+    type Settings,
+    type SkippedView,
+    type SuspectGroup,
+    type VerifyProgress,
+    type VerifyReport,
+  } from "$lib/api";
+  import { buildTree, foldersOf, under, type TreeNode } from "$lib/tree";
+  import { listed, removableCopies, tallyBursts } from "$lib/copies";
+  import ColumnHead from "$lib/components/ColumnHead.svelte";
+  import {
+    cleanOrder,
+    cleanPane,
+    cleanPreview,
+    clampPreview,
+    PREVIEW_PANE,
+    PREVIEW_PANE_KEY,
+    cleanWidths,
+    clampPane,
+    template,
+    widthOf,
+    withWidth,
+    FILE_COLUMNS,
+    TREE_COLUMNS,
+    TREE_PANE,
+    TREE_PANE_KEY,
+    type ColumnSet,
+    type ColumnWidths,
+    type FileColumnId,
+    type TreeColumnId,
+  } from "$lib/columns";
+  import {
+    cleanLook,
+    cleanTile,
+    LOOK_KEY,
+    TILE_KEY,
+    type Look,
+  } from "$lib/look";
+  import { appVersion, releaseUrl, versionLabel } from "$lib/version";
+  import SetupPanel from "$lib/components/SetupPanel.svelte";
+  import TreeItem from "$lib/components/TreeItem.svelte";
+  import FileList from "$lib/components/FileList.svelte";
+  import {
+    SORT_KEY,
+    cleanSort,
+    nextSort,
+    type Sorted,
+  } from "$lib/ordering";
+  import PreviewPane from "$lib/components/PreviewPane.svelte";
+  import DateFixPanel from "$lib/components/DateFixPanel.svelte";
+  import TimeScape from "$lib/components/TimeScape.svelte";
+  import ChartsPanel from "$lib/components/ChartsPanel.svelte";
+  import GalleryView from "$lib/components/GalleryView.svelte";
+  import RingsView from "$lib/components/RingsView.svelte";
+  import FilterBar from "$lib/components/FilterBar.svelte";
+  import {
+    keepsQuality,
+    keepsTags,
+    merged,
+    tagCounts,
+    type Sighting,
+    MIN_QUALITY,
+    UNTAGGED,
+  } from "$lib/tags";
+  import { filterRange, sameRange, type TimeRange } from "$lib/viz/range";
+
+  type Job = "scan" | "copy" | "verify";
+
+  let settings = $state<Settings | null>(null);
+  let summary = $state<PlanSummary | null>(null);
+  let folders = $state<FolderNode[]>([]);
+  let expanded = $state(new Set<string>());
+  let selectedFolder = $state<string | null>(null);
+  let selectedEntry = $state<EntryView | null>(null);
+  let marked = $state<string[]>([]);
+  let preview = $state<Preview | null>(null);
+  let previewLoading = $state(false);
+  let suspects = $state<SuspectGroup[]>([]);
+  let fixing = $state(false);
+  let view = $state<"folders" | "timeline" | "charts" | "gallery" | "rings">("folders");
+  let timelineEntries = $state<EntryView[]>([]);
+  let loadingAll = $state(false);
+  let tagProgress = $state<TagProgress | null>(null);
+  const tagShare = $derived(
+    tagProgress && tagProgress.total > 0
+      ? Math.round((tagProgress.done / tagProgress.total) * 100)
+      : 0,
+  );
+  let tagging = $state(false);
+  let canLook = $state(false);
+  let tagNote = $state<string | null>(null);
+  let tagsBySource = $state<Record<string, Sighting>>({});
+  let facesBySource = $state<Record<string, Spot[]>>({});
+  let faceProgress = $state<TagProgress | null>(null);
+  const faceShare = $derived(
+    faceProgress && faceProgress.total > 0
+      ? Math.round((faceProgress.done / faceProgress.total) * 100)
+      : 0,
+  );
+  let hunting = $state(false);
+  let canSeeFaces = $state(false);
+  let faceNote = $state<string | null>(null);
+  let onlyFaces = $state(false);
+  let names = $state<NameCount[]>([]);
+  let pickedNames = $state<string[] | null>(null);
+  let pickedTags = $state<string[] | null>(null);
+  let leastQuality = $state(MIN_QUALITY);
+  let query = $state("");
+  let hits = $state<TagHit[] | null>(null);
+  let searching = $state(false);
+  let scopes = $state<TimeRange[]>([]);
+
+  let job = $state<Job | null>(null);
+  let scanProgress = $state<ScanProgress | null>(null);
+  let copyProgress = $state<CopyProgress | null>(null);
+  let verifyProgress = $state<VerifyProgress | null>(null);
+  let verifyReport = $state<VerifyReport | null>(null);
+  let copyFailures = $state<CopyReport["failures"]>([]);
+  let skipped = $state<SkippedView[]>([]);
+  let issuesOpen = $state(false);
+  let copiesOpen = $state(false);
+  let copiesBusy = $state(false);
+  let duplicates = $state<DuplicateReport | null>(null);
+  let pruneAsked = $state(false);
+  let pruning = $state(false);
+  let bursts = $state<BurstView[]>([]);
+  let lookalikes = $state<LookalikeView[]>([]);
+
+  const identicalList = $derived(listed(duplicates?.groups ?? []));
+  const burstList = $derived(listed(bursts));
+  const burstTally = $derived(tallyBursts(bursts));
+  const lookalikeList = $derived(listed(lookalikes));
+  const lookalikeTally = $derived(tallyBursts(lookalikes));
+
+  async function findCopies() {
+    copiesOpen = true;
+    copiesBusy = true;
+    pruneAsked = false;
+    try {
+      [duplicates, bursts, lookalikes] = await Promise.all([
+        findDuplicates(),
+        findBursts(),
+        findLookalikes(),
+      ]);
+    } catch (e) {
+      fail(String(e));
+      copiesOpen = false;
+    } finally {
+      copiesBusy = false;
+    }
+  }
+
+  async function pruneCopies() {
+    pruning = true;
+    try {
+      const report = await removeExtraCopies();
+      pruneAsked = false;
+      notice =
+        `Sent ${report.removed.toLocaleString()} copies to the recycle bin, ` +
+        `${formatBytes(report.freed)} freed, one of each kept.` +
+        (report.failures.length > 0 ? ` ${report.failures.length} could not be removed.` : "");
+      [duplicates, bursts, lookalikes] = await Promise.all([
+        findDuplicates(),
+        findBursts(),
+        findLookalikes(),
+      ]);
+      await refreshTree(false);
+    } catch (e) {
+      fail(String(e));
+    } finally {
+      pruning = false;
+    }
+  }
+
+  let notice = $state<string | null>(null);
+  let error = $state<string | null>(null);
+  let patternError = $state<string | null>(null);
+
+  let columnOrder = $state<TreeColumnId[]>(rememberedOrder(TREE_COLUMNS));
+  let columnWidths = $state<ColumnWidths<TreeColumnId>>(rememberedWidths(TREE_COLUMNS));
+  let fileOrder = $state<FileColumnId[]>(rememberedOrder(FILE_COLUMNS));
+  let fileWidths = $state<ColumnWidths<FileColumnId>>(rememberedWidths(FILE_COLUMNS));
+  let version = $state<string | null>(null);
+  let faceBoxes = $state<boolean>(rememberedBoxes());
+  let treeWidth = $state<number>(rememberedPane());
+  let previewWidth = $state<number>(rememberedPreview());
+  let dateOffsets = $state<OffsetView[]>([]);
+  let fileSort = $state<Sorted | null>(
+    cleanSort(remembered(SORT_KEY), FILE_COLUMNS.columns.map((c) => c.id)),
+  );
+
+  function sortFiles(id: FileColumnId) {
+    fileSort = nextSort(fileSort, id);
+    remember(SORT_KEY, fileSort);
+  }
+
+  async function refreshOffsets() {
+    try {
+      dateOffsets = await planOffsets();
+    } catch {
+      dateOffsets = [];
+    }
+  }
+  let fileLook = $state<Look>(cleanLook(remembered(LOOK_KEY)));
+  let fileTile = $state<number>(cleanTile(remembered(TILE_KEY)));
+
+  function remembered(key: string): unknown {
+    if (typeof localStorage === "undefined") return null;
+    try {
+      const held = localStorage.getItem(key);
+      return held === null ? null : JSON.parse(held);
+    } catch {
+      return null;
+    }
+  }
+
+  function lookAt(next: Look) {
+    fileLook = next;
+    remember(LOOK_KEY, next);
+  }
+
+  function sizeTiles(edge: number) {
+    fileTile = cleanTile(edge);
+    remember(TILE_KEY, fileTile);
+  }
+
+  let splitting = $state<boolean>(false);
+  let previewSplitting = $state<boolean>(false);
+
+  const SPLIT_STEP = 8;
+
+  function rememberedPane(): number {
+    if (typeof localStorage === "undefined") return TREE_PANE;
+    try {
+      const held = localStorage.getItem(TREE_PANE_KEY);
+      return cleanPane(held === null ? null : JSON.parse(held));
+    } catch {
+      return TREE_PANE;
+    }
+  }
+
+  function sizeTree(width: number) {
+    treeWidth = clampPane(width);
+    remember(TREE_PANE_KEY, treeWidth);
+  }
+
+  function rememberedPreview(): number {
+    if (typeof localStorage === "undefined") return PREVIEW_PANE;
+    try {
+      const held = localStorage.getItem(PREVIEW_PANE_KEY);
+      return cleanPreview(held === null ? null : JSON.parse(held));
+    } catch {
+      return PREVIEW_PANE;
+    }
+  }
+
+  function sizePreview(width: number) {
+    previewWidth = clampPreview(width);
+    remember(PREVIEW_PANE_KEY, previewWidth);
+  }
+
+  function grabPreviewSplit(event: PointerEvent) {
+    const bar = event.currentTarget as HTMLElement;
+    event.preventDefault();
+    previewSplitting = true;
+    bar.setPointerCapture(event.pointerId);
+  }
+
+  function slidePreviewSplit(event: PointerEvent) {
+    if (!previewSplitting) return;
+    const bar = event.currentTarget as HTMLElement;
+    const right = bar.nextElementSibling?.getBoundingClientRect().right ?? 0;
+    sizePreview(right - event.clientX);
+  }
+
+  function releasePreviewSplit(event: PointerEvent) {
+    if (!previewSplitting) return;
+    const bar = event.currentTarget as HTMLElement;
+    if (bar.hasPointerCapture(event.pointerId)) bar.releasePointerCapture(event.pointerId);
+    previewSplitting = false;
+  }
+
+  function stretchPreviewSplit(event: KeyboardEvent) {
+    const by = event.key === "ArrowLeft" ? SPLIT_STEP : event.key === "ArrowRight" ? -SPLIT_STEP : 0;
+    if (by === 0) return;
+    event.preventDefault();
+    sizePreview(previewWidth + by);
+  }
+
+  function grabSplit(event: PointerEvent) {
+    const bar = event.currentTarget as HTMLElement;
+    event.preventDefault();
+    splitting = true;
+    bar.setPointerCapture(event.pointerId);
+  }
+
+  function slideSplit(event: PointerEvent) {
+    if (!splitting) return;
+    const bar = event.currentTarget as HTMLElement;
+    const left = bar.previousElementSibling?.getBoundingClientRect().left ?? 0;
+    sizeTree(event.clientX - left);
+  }
+
+  function releaseSplit(event: PointerEvent) {
+    if (!splitting) return;
+    const bar = event.currentTarget as HTMLElement;
+    if (bar.hasPointerCapture(event.pointerId)) bar.releasePointerCapture(event.pointerId);
+    splitting = false;
+  }
+
+  function stretchSplit(event: KeyboardEvent) {
+    const by = event.key === "ArrowLeft" ? -SPLIT_STEP : event.key === "ArrowRight" ? SPLIT_STEP : 0;
+    if (by === 0) return;
+    event.preventDefault();
+    sizeTree(treeWidth + by);
+  }
+
+  function rememberedBoxes(): boolean {
+    if (typeof localStorage === "undefined") return true;
+    try {
+      const held = localStorage.getItem(BOXES_KEY);
+      return showBoxes(held === null ? null : JSON.parse(held));
+    } catch {
+      return true;
+    }
+  }
+
+  function keepBoxes(show: boolean) {
+    faceBoxes = show;
+    remember(BOXES_KEY, show);
+  }
+
+  function rememberedOrder<Id extends string>(set: ColumnSet<Id>): Id[] {
+    if (typeof localStorage === "undefined") return cleanOrder(set, null);
+    try {
+      const held = localStorage.getItem(set.orderKey);
+      return cleanOrder(set, held === null ? null : JSON.parse(held));
+    } catch {
+      return cleanOrder(set, null);
+    }
+  }
+
+  function reorderColumns(next: TreeColumnId[]) {
+    columnOrder = next;
+    remember(TREE_COLUMNS.orderKey, next);
+  }
+
+  function reorderFileColumns(next: FileColumnId[]) {
+    fileOrder = next;
+    remember(FILE_COLUMNS.orderKey, next);
+  }
+
+  function rememberedWidths<Id extends string>(set: ColumnSet<Id>): ColumnWidths<Id> {
+    if (typeof localStorage === "undefined") return {};
+    try {
+      const held = localStorage.getItem(set.widthKey);
+      return cleanWidths(set, held === null ? null : JSON.parse(held));
+    } catch {
+      return {};
+    }
+  }
+
+  function resizeColumn(id: TreeColumnId, width: number | null) {
+    columnWidths = withWidth(TREE_COLUMNS, columnWidths, id, width);
+    remember(TREE_COLUMNS.widthKey, columnWidths);
+  }
+
+  function resizeFileColumn(id: FileColumnId, width: number | null) {
+    fileWidths = withWidth(FILE_COLUMNS, fileWidths, id, width);
+    remember(FILE_COLUMNS.widthKey, fileWidths);
+  }
+
+  function remember(key: string, value: unknown) {
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // a layout we cannot remember is not worth interrupting anyone over
+    }
+  }
+
+  const busy = $derived(job !== null);
+  const canScan = $derived(
+    !busy &&
+      settings !== null &&
+      settings.sources.length > 0 &&
+      settings.providers.length > 0 &&
+      patternError === null,
+  );
+  const canRun = $derived(
+    !busy && summary !== null && summary.files > 0 && summary.destination !== null,
+  );
+  const runHint = $derived(
+    summary !== null && summary.destination === null
+      ? "Choose a destination folder first"
+      : undefined,
+  );
+  const suspectCount = $derived(suspects.reduce((total, group) => total + group.files, 0));
+  const issueCount = $derived(
+    skipped.length + copyFailures.length + (verifyReport?.issues.length ?? 0) + suspects.length,
+  );
+  const scope = $derived<TimeRange | null>(scopes[scopes.length - 1] ?? null);
+  const taggedEntries = $derived(
+    timelineEntries.map((entry) => {
+      const seen = tagsBySource[entry.source];
+      if (seen === undefined) return entry;
+      return {
+        ...entry,
+        tags: seen.tags.length > 0 ? seen.tags : entry.tags,
+        quality: seen.quality,
+      };
+    }),
+  );
+  const counts = $derived(tagCounts(taggedEntries));
+  const anyRated = $derived(taggedEntries.some((entry) => entry.quality != null));
+  const anyTagged = $derived(counts.some((count) => count.tag !== UNTAGGED));
+  const searchedEntries = $derived(
+    hits === null
+      ? taggedEntries
+      : hits
+          .map((hit) => taggedEntries.find((entry) => entry.source === hit.source))
+          .filter((entry): entry is EntryView => entry !== undefined),
+  );
+  const foundEntries = $derived(
+    searchedEntries.filter(
+      (entry) =>
+        keepsTags(entry.tags, pickedTags) &&
+        keepsQuality(entry.quality, leastQuality) &&
+        (!onlyFaces || countFaces(facesBySource, entry.source) > 0) &&
+        wearingAll(facesBySource, entry.source, pickedNames),
+    ),
+  );
+  const anyFaces = $derived(Object.keys(facesBySource).length > 0);
+  const faceTally = $derived(tally(facesBySource));
+  const scopedEntries = $derived(filterRange(foundEntries, scope));
+  const entries = $derived(under(scopedEntries, selectedFolder));
+  const markedEntries = $derived(entries.filter((entry) => marked.includes(entry.source)));
+
+  const tree = $derived<TreeNode[]>(buildTree(foldersOf(scopedEntries)));
+  const flatTree = $derived(flatten(tree));
+  const columnGrid = $derived(
+    template(TREE_COLUMNS, columnOrder, {
+      name: columnWidths.name ?? 0,
+      files:
+        columnWidths.files ??
+        widthOf(
+          TREE_COLUMNS,
+          "files",
+          flatTree.map((node) => String(node.files)),
+        ),
+      size:
+        columnWidths.size ??
+        widthOf(
+          TREE_COLUMNS,
+          "size",
+          flatTree.map((node) => formatBytes(node.bytes)),
+        ),
+    }),
+  );
+
+  function flatten(nodes: TreeNode[]): TreeNode[] {
+    return nodes.flatMap((node) => [node, ...flatten(node.children)]);
+  }
+
+  function drill(next: TimeRange) {
+    if (sameRange(next, scope)) return;
+    scopes = [next];
+  }
+
+  let unlisteners: UnlistenFn[] = [];
+
+  onMount(async () => {
+    settings = await getSettings();
+    version = await appVersion();
+    await refreshLooking();
+
+    unlisteners = await Promise.all([
+      listen<Settings>("settings:changed", (e) => (settings = e.payload)),
+      listen<ScanProgress>("scan:progress", (e) => (scanProgress = e.payload)),
+      listen<PlanSummary>("scan:done", async (e) => {
+        job = null;
+        scanProgress = null;
+        summary = e.payload;
+        notice = `Planned ${e.payload.files} files into ${e.payload.folders} folders.`;
+        await refreshTree(true);
+        await refreshLooking();
+        if (settings?.tag_pictures) void beginTagging();
+        if (settings?.find_faces) void beginFaceHunt();
+      }),
+      listen<string>("scan:error", (e) => fail(e.payload)),
+      listen<TagProgress>("tags:progress", (e) => (tagProgress = e.payload)),
+      listen<Record<string, Sighting>>(
+        "tags:seen",
+        (e) => (tagsBySource = merged(tagsBySource, e.payload)),
+      ),
+      listen<number>("tags:done", async () => {
+        tagProgress = null;
+        tagging = false;
+        await refreshTags();
+        await refreshLooking();
+      }),
+      listen<string>("tags:error", (e) => {
+        tagProgress = null;
+        tagging = false;
+        tagNote = e.payload;
+      }),
+      listen<TagProgress>("faces:progress", (e) => (faceProgress = e.payload)),
+      listen<Record<string, Spot[]>>(
+        "faces:seen",
+        (e) => (facesBySource = { ...facesBySource, ...e.payload }),
+      ),
+      listen<number>("faces:done", async () => {
+        faceProgress = null;
+        hunting = false;
+        await refreshFaces();
+      }),
+      listen<string>("faces:error", (e) => {
+        faceProgress = null;
+        hunting = false;
+        faceNote = e.payload;
+      }),
+      listen<CopyProgress>("copy:progress", (e) => (copyProgress = e.payload)),
+      listen<{ report: CopyReport }>("copy:done", async (e) => {
+        job = null;
+        copyProgress = e.payload.report.progress;
+        copyFailures = e.payload.report.failures;
+        notice = `Copied ${e.payload.report.progress.copied}, ${e.payload.report.progress.duplicates} kept as copies, ${e.payload.report.progress.already_present} already there.`;
+        await refreshTree(false);
+      }),
+      listen<string>("copy:error", (e) => fail(e.payload)),
+      listen<VerifyProgress>("verify:progress", (e) => (verifyProgress = e.payload)),
+      listen<{ report: VerifyReport }>("verify:done", (e) => {
+        job = null;
+        verifyProgress = null;
+        verifyReport = e.payload.report;
+        notice = `Checked: ${e.payload.report.ok} fine, ${e.payload.report.destination_missing} missing, ${e.payload.report.content_mismatch} differing.`;
+        issuesOpen = e.payload.report.issues.length > 0;
+      }),
+      listen<string>("verify:error", (e) => fail(e.payload)),
+    ]);
+
+    if (settings.last_plan) {
+      try {
+        summary = await openPlan(settings.last_plan);
+        await refreshTree(true);
+        notice = "Reopened the last plan.";
+      } catch {
+        /* the plan is gone; start fresh */
+      }
+    }
+  });
+
+  onDestroy(() => unlisteners.forEach((un) => un()));
+
+  function fail(message: string) {
+    job = null;
+    scanProgress = null;
+    verifyProgress = null;
+    error = message === "cancelled" ? "Stopped. Run it again to continue where it left off." : message;
+  }
+
+  function fileName(path: string): string {
+    const at = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    return at >= 0 ? path.slice(at + 1) : path;
+  }
+
+  async function openReleases() {
+    try {
+      await openUrl(releaseUrl(version));
+    } catch (e) {
+      fail(String(e));
+    }
+  }
+
+  async function updateSettings(next: Settings) {
+    const retarget = summary !== null && next.destination !== summary.destination;
+    settings = next;
+    try {
+      await checkFolderPattern(next.folder_pattern);
+      patternError = null;
+    } catch (e) {
+      patternError = String(e);
+    }
+    await saveSettings(next);
+
+    if (retarget) {
+      try {
+        summary = await setDestination(next.destination);
+        await refreshTree(false);
+        notice = next.destination
+          ? `The plan now copies into ${next.destination}.`
+          : "The plan has no destination folder.";
+      } catch (e) {
+        error = String(e);
+      }
+    }
+  }
+
+  async function beginTagging(afresh = false) {
+    tagNote = null;
+    try {
+      const status = await tagModelStatus();
+      if (!status.built_in) {
+        tagNote = "This build was made without the tagging model.";
+        return;
+      }
+      if (!status.present) {
+        tagNote = "The tagging model is not downloaded yet. Get it in the setup panel.";
+        return;
+      }
+      tagging = true;
+      await startTagging(afresh);
+    } catch (e) {
+      tagging = false;
+      tagNote = String(e);
+    }
+  }
+
+  async function beginFaceHunt(afresh = false) {
+    faceNote = null;
+    try {
+      const status = await faceStatus();
+      if (!status.built_in) {
+        faceNote = "This build was made without the face detector.";
+        return;
+      }
+      hunting = true;
+      await startFaceHunt(afresh);
+    } catch (e) {
+      hunting = false;
+      faceNote = String(e);
+    }
+  }
+
+  async function refreshFaces() {
+    try {
+      facesBySource = await listFaces();
+    } catch {
+      facesBySource = {};
+    }
+    try {
+      const status = await faceStatus();
+      canSeeFaces = status.built_in && status.present;
+    } catch {
+      canSeeFaces = false;
+    }
+    try {
+      names = await listNames();
+    } catch {
+      names = [];
+    }
+  }
+
+  async function sayWhoThisIs(ord: number, label: string | null, spread: boolean) {
+    if (!selectedEntry) return;
+    try {
+      const done = await nameFace(selectedEntry.source, ord, label, spread);
+      await refreshFaces();
+      if (done.alike > 0) {
+        notice = `Named ${done.alike.toLocaleString()} more ${done.alike === 1 ? "face" : "faces"} that match.`;
+      }
+    } catch (e) {
+      faceNote = String(e);
+    }
+  }
+
+  async function refreshLooking() {
+    try {
+      const status = await tagModelStatus();
+      canLook = status.built_in && status.present;
+    } catch {
+      canLook = false;
+    }
+  }
+
+  async function refreshTags() {
+    try {
+      tagsBySource = await listTags();
+    } catch {
+      tagsBySource = {};
+    }
+  }
+
+  let likeOf = $state<string | null>(null);
+
+  async function lookLike(source: string) {
+    searching = true;
+    likeOf = source;
+    query = "";
+    try {
+      hits = await picturesLike(source);
+    } catch (e) {
+      tagNote = String(e);
+      hits = null;
+      likeOf = null;
+    } finally {
+      searching = false;
+    }
+  }
+
+  async function look() {
+    likeOf = null;
+    const words = query.trim();
+    if (words === "") {
+      hits = null;
+      return;
+    }
+    searching = true;
+    try {
+      hits = await searchPictures(words);
+    } catch (e) {
+      tagNote = String(e);
+      hits = null;
+    } finally {
+      searching = false;
+    }
+  }
+
+  function clearSearch() {
+    query = "";
+    hits = null;
+    likeOf = null;
+  }
+
+  async function refreshTree(reset: boolean) {
+    void refreshOffsets();
+    folders = await listFolders();
+    loadingAll = true;
+    try {
+      timelineEntries = await listAllEntries();
+    } finally {
+      loadingAll = false;
+    }
+    await refreshTags();
+    await refreshFaces();
+    skipped = await listSkipped();
+    suspects = await listSuspects();
+    if (reset) {
+      scopes = [];
+      expanded = new Set(buildTree(folders).map((node) => node.path));
+      selectedFolder = null;
+      selectedEntry = null;
+      marked = [];
+      preview = null;
+    }
+  }
+
+  function selectFolder(key: string) {
+    selectedFolder = key;
+    selectedEntry = null;
+    marked = [];
+    preview = null;
+  }
+
+  function showAll(next: "timeline" | "charts" | "gallery" | "rings") {
+    view = next;
+  }
+
+  async function afterFix(message: string) {
+    folders = await listFolders();
+    suspects = await listSuspects();
+
+    timelineEntries = await listAllEntries();
+    marked = marked.filter((source) => entries.some((entry) => entry.source === source));
+
+    const pool = view === "folders" ? entries : timelineEntries;
+    selectedEntry = pool.find((entry) => entry.source === selectedEntry?.source) ?? null;
+
+    if (summary) {
+      summary = { ...summary, folders: folders.length };
+    }
+    notice = message;
+    error = null;
+  }
+
+  let shooting = $state(false);
+
+  async function shoot() {
+    if (shooting) return;
+    shooting = true;
+    try {
+      const path = await saveScreenshot();
+      notice = `Screenshot saved as ${path}`;
+      error = null;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      shooting = false;
+    }
+  }
+
+  async function fix<T>(action: () => Promise<T>, describe: (result: T) => string) {
+    if (fixing) return;
+    fixing = true;
+    try {
+      const result = await action();
+      await afterFix(describe(result));
+    } catch (e) {
+      error = String(e);
+    } finally {
+      fixing = false;
+    }
+  }
+
+  const chooseDate = (choice: DateChoice) => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return fix(
+      () => setDateOverride(source, choice),
+      (entry) => `Moved into ${entry.folder || "the destination root"}.`,
+    );
+  };
+
+  const revertDate = () => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return fix(
+      () => clearDateOverride(source),
+      (entry) => `Back to the detected date, ${entry.taken}.`,
+    );
+  };
+
+  function patchEntry(updated: EntryView) {
+    const swap = (list: EntryView[]) =>
+      list.map((entry) => (entry.source === updated.source ? updated : entry));
+    timelineEntries = swap(timelineEntries);
+    selectedEntry = updated;
+  }
+
+  async function turnSelected<T extends EntryView>(action: () => Promise<T>, message: string) {
+    if (fixing) return;
+    fixing = true;
+    try {
+      patchEntry(await action());
+      notice = message;
+      error = null;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      fixing = false;
+    }
+  }
+
+  const turnEntry = (quarterTurns: number) => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return turnSelected(() => turnRotation(source, quarterTurns), "Turned.");
+  };
+
+  const resetTurn = () => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return turnSelected(() => clearRotation(source), "Back to the detected orientation.");
+  };
+
+  const allowReencode = () => {
+    const source = selectedEntry?.source;
+    if (!source) return;
+    return turnSelected(
+      () => setRotation(source, true),
+      "This one will be re-encoded when it is copied.",
+    );
+  };
+
+  const rotateMarkedFiles = (sources: string[], quarterTurns: number) =>
+    fix(
+      () => rotateMarked(sources, quarterTurns),
+      (count) => `Turned ${count} ${count === 1 ? "file" : "files"}.`,
+    );
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (view === "gallery" || view === "rings" || busy || fixing) return;
+    const target = event.target as HTMLElement | null;
+    if (
+      target &&
+      (target.isContentEditable ||
+        ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName))
+    ) {
+      return;
+    }
+    if (!selectedEntry || selectedEntry.orientation === 0) return;
+
+    switch (event.key) {
+      case "[":
+        event.preventDefault();
+        turnEntry(-1);
+        break;
+      case "]":
+        event.preventDefault();
+        turnEntry(1);
+        break;
+      case "\\":
+        event.preventDefault();
+        turnEntry(2);
+        break;
+      case "0":
+        event.preventDefault();
+        resetTurn();
+        break;
+    }
+  }
+
+  const shiftMarked = (sources: string[], seconds: number) =>
+    fix(
+      () => shiftDates(sources, seconds),
+      (count) => `Shifted ${count} ${count === 1 ? "file" : "files"}.`,
+    );
+
+  const reproviderMarked = (sources: string[], provider: Provider) =>
+    fix(
+      () => reproviderCluster(sources, provider),
+      (count) => `Re-dated ${count} ${count === 1 ? "file" : "files"} from ${provider}.`,
+    );
+
+  async function selectSuspects(group: SuspectGroup) {
+    const folder = group.destination_folders[0] ?? "";
+    if (folder !== selectedFolder) {
+      await selectFolder(folder);
+      expanded = new Set([...expanded, ...ancestors(folder)]);
+    }
+
+    marked = group.sources.filter((source) => entries.some((entry) => entry.source === source));
+    selectedEntry = entries.find((entry) => entry.source === marked[0]) ?? null;
+    if (selectedEntry) await selectEntry(selectedEntry);
+
+    issuesOpen = false;
+    if (group.destination_folders.length > 1) {
+      notice = `Showing the ${marked.length} of ${group.files} that land in ${folder || "the destination root"}.`;
+    }
+  }
+
+  function ancestors(folder: string): string[] {
+    const parts = folder.split("/").filter(Boolean);
+    return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+  }
+
+  function toggleFolder(path: string) {
+    const next = new Set(expanded);
+    if (!next.delete(path)) {
+      next.add(path);
+    }
+    expanded = next;
+  }
+
+  async function selectEntry(entry: EntryView) {
+    selectedEntry = entry;
+    preview = null;
+    previewLoading = true;
+    try {
+      preview = await previewFile(entry.source);
+    } finally {
+      previewLoading = false;
+    }
+  }
+
+  async function run(kind: Job, action: () => Promise<unknown>) {
+    if (!settings) return;
+    error = null;
+    notice = null;
+    job = kind;
+    try {
+      await action();
+    } catch (e) {
+      fail(String(e));
+    }
+  }
+
+  const scan = () =>
+    run("scan", async () => {
+      verifyReport = null;
+      copyFailures = [];
+      copyProgress = null;
+      await startScan({
+        sources: settings!.sources,
+        destination: settings!.destination,
+        folder_pattern: settings!.folder_pattern,
+        providers: settings!.providers,
+        strategy: settings!.strategy,
+        weights: settings!.weights ?? {},
+        follow_symlinks: settings!.follow_symlinks,
+        auto_rotate: settings!.auto_rotate,
+        pair_companions: settings!.pair_companions,
+        name_places: settings!.name_places,
+      });
+    });
+
+  const copy = () =>
+    run("copy", () =>
+      startCopy(settings!.preserve_times, settings!.stamp_date, settings!.write_sidecars),
+    );
+  const check = () => run("verify", () => startVerify(settings!.compare_hashes));
+
+  async function openInSystem(path: string) {
+    try {
+      await openPath(path);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function reveal(path: string) {
+    try {
+      await revealItemInDir(path);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+</script>
+
+<svelte:window onkeydown={onKeydown} />
+
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="mark">◱</span>
+      <div>
+        <h1>Eonsort</h1>
+        {#if summary}
+          <p class="faint truncate" title={summary.destination ?? "No destination chosen yet"}>
+            {summary.files} files · {formatBytes(summary.bytes)} ·
+            {summary.destination
+              ? `into ${summary.destination}`
+              : "no destination yet, pick one to copy"}
+          </p>
+        {:else}
+          <p class="faint">Pick your folders, scan, review, then copy.</p>
+        {/if}
+      </div>
+    </div>
+
+    <div class="actions">
+      <div class="views">
+        <button class:active={view === "folders"} onclick={() => (view = "folders")}>Folders</button>
+        <button class:active={view === "timeline"} onclick={() => showAll("timeline")}>
+          Timeline
+        </button>
+        <button class:active={view === "charts"} onclick={() => showAll("charts")}>Charts</button>
+        <button class:active={view === "gallery"} onclick={() => showAll("gallery")}>Gallery</button>
+        <button class:active={view === "rings"} onclick={() => showAll("rings")}>Rings</button>
+      </div>
+      <div class="look">
+        <input
+          type="search"
+          placeholder="Search the pictures"
+          bind:value={query}
+          onkeydown={(e) => {
+            if (e.key === "Enter") void look();
+            if (e.key === "Escape") clearSearch();
+          }}
+        />
+        <button onclick={() => void look()} disabled={searching || query.trim() === ""}>
+          {searching ? "Looking…" : "Find"}
+        </button>
+        {#if hits !== null}
+          <button class="ghost" onclick={clearSearch}>Clear</button>
+        {/if}
+      </div>
+      <button class="primary" onclick={scan} disabled={!canScan}>Scan</button>
+      <button onclick={copy} disabled={!canRun} title={runHint}>Copy files</button>
+      <button onclick={check} disabled={!canRun} title={runHint}>Check result</button>
+      {#if canLook}
+        {#if tagging}
+          <button class="ghost" onclick={() => void cancelTagging()}>Stop tagging</button>
+        {:else}
+          <button
+            onclick={() => void beginTagging(false)}
+            disabled={busy || timelineEntries.length === 0}
+            title="Tag the pictures, carrying on where the last pass stopped"
+          >
+            Start tagging
+          </button>
+        {/if}
+      {/if}
+      {#if canSeeFaces}
+        {#if hunting}
+          <button class="ghost" onclick={() => void cancelFaceHunt()}>Stop looking</button>
+        {:else}
+          <button
+            onclick={() => void beginFaceHunt(false)}
+            disabled={busy || timelineEntries.length === 0}
+            title="Find the faces, carrying on where the last pass stopped"
+          >
+            Find faces
+          </button>
+          {#if anyFaces}
+            <button
+              class="ghost"
+              onclick={() => void beginFaceHunt(true)}
+              disabled={busy || timelineEntries.length === 0}
+              title="Forget the faces found so far and look at every picture again"
+            >
+              Look again
+            </button>
+          {/if}
+        {/if}
+      {/if}
+      {#if busy}
+        <button class="danger" onclick={() => cancelJob()}>Stop</button>
+      {/if}
+      {#if dev}
+        <button
+          class="ghost"
+          onclick={() => void shoot()}
+          disabled={shooting}
+          title="Save a PNG of the whole window in the working folder"
+        >
+          {shooting ? "Saving…" : "Screenshot"}
+        </button>
+      {/if}
+    </div>
+  </header>
+
+  {#if faceProgress || faceNote}
+    <div class="tagbar faint tiny">
+      {#if faceProgress}
+        <span class="spinner"></span>
+        {#if faceProgress.note}
+          <span>{faceProgress.note}&hellip;</span>
+        {:else}
+          <span>
+            Looking for faces: {faceProgress.done.toLocaleString()} of {faceProgress.total.toLocaleString()}
+            ({faceShare}%)
+          </span>
+          <div class="bar thin">
+            <div class="fill" style="width: {faceShare}%"></div>
+          </div>
+          {#if faceProgress.current}
+            <span class="truncate current" title={faceProgress.current}>
+              {fileName(faceProgress.current)}
+            </span>
+          {/if}
+        {/if}
+        <button class="ghost" onclick={() => void cancelFaceHunt()}>Stop</button>
+      {/if}
+      {#if faceNote}
+        <span>{faceNote}</span>
+      {/if}
+    </div>
+  {/if}
+
+  {#if tagProgress || tagNote || hits !== null}
+    <div class="tagbar faint tiny">
+      {#if tagProgress}
+        <span class="spinner"></span>
+        {#if tagProgress.note}
+          <span>{tagProgress.note}&hellip;</span>
+        {:else}
+          <span>
+            Tagging pictures: {tagProgress.done.toLocaleString()} of {tagProgress.total.toLocaleString()}
+            ({tagShare}%)
+          </span>
+          <div class="bar thin">
+            <div class="fill" style="width: {tagShare}%"></div>
+          </div>
+          {#if tagProgress.current}
+            <span class="truncate current" title={tagProgress.current}>
+              {fileName(tagProgress.current)}
+            </span>
+          {/if}
+        {/if}
+        <button class="ghost" onclick={() => void cancelTagging()}>Stop</button>
+      {:else if hits !== null && likeOf !== null}
+        <span>
+          {hits.length.toLocaleString()} pictures look like
+          <span class="mono">{fileName(likeOf)}</span> — matched on what is in them, not on their
+          bytes.
+        </span>
+        <button class="ghost" onclick={clearSearch}>Show all again</button>
+      {:else if hits !== null}
+        <span>{hits.length.toLocaleString()} pictures match &ldquo;{query.trim()}&rdquo;</span>
+        <button class="ghost" onclick={clearSearch}>Show all again</button>
+      {/if}
+      {#if tagNote}
+        <span>{tagNote}</span>
+      {/if}
+    </div>
+  {/if}
+
+  {#if timelineEntries.length > 0}
+    <FilterBar
+      range={scope}
+      counts={anyTagged ? counts : []}
+      picked={pickedTags}
+      least={leastQuality}
+      rated={anyRated}
+      shown={scopedEntries.length}
+      total={timelineEntries.length}
+      faces={anyFaces}
+      {onlyFaces}
+      {faceTally}
+      {names}
+      {pickedNames}
+      onRange={(next) => (scopes = next === null ? [] : [next])}
+      onPick={(next) => (pickedTags = next)}
+      onRate={(next) => (leastQuality = next)}
+      onFaces={(next) => (onlyFaces = next)}
+      onName={(next) => (pickedNames = next)}
+    />
+  {/if}
+
+  {#if settings}
+    <main
+      class:wide={view !== "folders"}
+      style="--tree-pane: {treeWidth}px; --preview-pane: {previewWidth}px"
+    >
+      <SetupPanel
+        {settings}
+        {busy}
+        {patternError}
+        {tagging}
+        looked={Object.keys(tagsBySource).length}
+        pictures={timelineEntries.length > 0}
+        onChange={updateSettings}
+        onTag={(afresh) => void beginTagging(afresh)}
+        onStopTagging={() => void cancelTagging()}
+      />
+
+      {#if loadingAll}
+        <div class="loading faint">
+          <span class="spinner"></span>
+          Reading {summary ? summary.files.toLocaleString() : ""} files out of the plan…
+        </div>
+      {:else if view === "charts"}
+        <ChartsPanel entries={scopedEntries} range={scope} onDrill={drill} />
+      {:else if view === "gallery"}
+        <GalleryView entries={scopedEntries} onSelect={selectEntry} />
+      {:else if view === "rings"}
+        <RingsView entries={scopedEntries} onSelect={selectEntry} />
+      {:else if view === "timeline"}
+        <TimeScape entries={scopedEntries} selected={selectedEntry} onSelect={selectEntry} />
+      {:else}
+        <div class="tree scroll" role="tree" aria-label="Planned folders">
+          <ColumnHead
+            set={TREE_COLUMNS}
+            order={columnOrder}
+            grid={columnGrid}
+            onReorder={reorderColumns}
+            onResize={resizeColumn}
+          />
+          {#each tree as node (node.path)}
+            <TreeItem
+              {node}
+              depth={0}
+              selected={selectedFolder}
+              {expanded}
+              order={columnOrder}
+              grid={columnGrid}
+              onSelect={selectFolder}
+              onToggle={toggleFolder}
+            />
+          {:else}
+            <p class="placeholder faint">Nothing planned yet. Run a scan to see the preview.</p>
+          {/each}
+        </div>
+
+        <button
+          type="button"
+          class="splitter"
+          class:splitting
+          aria-label="Resize the folder list"
+          title="Drag to resize, or double click to reset"
+          onpointerdown={grabSplit}
+          onpointermove={slideSplit}
+          onpointerup={releaseSplit}
+          onpointercancel={releaseSplit}
+          ondblclick={() => sizeTree(TREE_PANE)}
+          onkeydown={stretchSplit}
+        ></button>
+
+        <FileList
+          {entries}
+          folder={selectedFolder}
+          selected={selectedEntry}
+          {marked}
+          order={fileOrder}
+          widths={fileWidths}
+          onSelect={selectEntry}
+          onMark={(sources) => (marked = sources)}
+          onOpen={(entry) => openInSystem(entry.source)}
+          onReorder={reorderFileColumns}
+          onResize={resizeFileColumn}
+          sorted={fileSort}
+          onSort={sortFiles}
+          look={fileLook}
+          tile={fileTile}
+          onLook={lookAt}
+          onTile={sizeTiles}
+        />
+      {/if}
+
+      <button
+        type="button"
+        class="splitter"
+        class:splitting={previewSplitting}
+        aria-label="Resize the preview"
+        title="Drag to resize, or double click to reset"
+        onpointerdown={grabPreviewSplit}
+        onpointermove={slidePreviewSplit}
+        onpointerup={releasePreviewSplit}
+        onpointercancel={releasePreviewSplit}
+        ondblclick={() => sizePreview(PREVIEW_PANE)}
+        onkeydown={stretchPreviewSplit}
+      ></button>
+
+      <PreviewPane
+        entry={selectedEntry}
+        {preview}
+        loading={previewLoading}
+        busy={fixing || busy}
+        onOpen={openInSystem}
+        onReveal={reveal}
+        onLike={(source) => void lookLike(source)}
+        onChoose={chooseDate}
+        onRevert={revertDate}
+        onTurn={turnEntry}
+        onResetTurn={resetTurn}
+        onReencode={allowReencode}
+        faces={selectedEntry ? (facesBySource[selectedEntry.source] ?? []) : []}
+        showFaces={faceBoxes}
+        onShowFaces={keepBoxes}
+        onName={(ord, label, spread) => void sayWhoThisIs(ord, label, spread)}
+        {names}
+      />
+    </main>
+  {/if}
+
+  {#if markedEntries.length > 1 && view === "folders"}
+    <DateFixPanel
+      entries={markedEntries}
+      busy={fixing || busy}
+      offsets={dateOffsets}
+      onShift={shiftMarked}
+      onReprovider={reproviderMarked}
+      onRotate={rotateMarkedFiles}
+      onClear={() => (marked = [])}
+    />
+  {/if}
+
+  {#if copiesOpen}
+    <section class="issues scroll">
+      <div class="issues-head">
+        <strong>Copies of the same picture</strong>
+        <button class="ghost" onclick={() => (copiesOpen = false)}>Close</button>
+      </div>
+      {#if copiesBusy}
+        <p class="faint">Reading every file to compare them…</p>
+      {:else}
+        <div class="copies-group">
+          <p class="group-head">The very same bytes</p>
+          {#if duplicates && duplicates.groups.length > 0}
+            <p>
+              <span class="badge warn">{formatBytes(duplicates.wasted)} in duplicates</span>
+              <span class="faint">
+                {duplicates.files} files hold the same bytes as another. Copying keeps only one of each
+                anyway, so this is what you save.
+              </span>
+            </p>
+            <div class="prune">
+              {#if pruneAsked}
+                <span class="warnText">
+                  This sends {removableCopies(duplicates).toLocaleString()} files to the recycle bin,
+                  keeping the copy nearest the top of each folder tree. Bursts are left alone. Sure?
+                </span>
+                <button class="danger" disabled={pruning} onclick={() => void pruneCopies()}>
+                  {pruning ? "Removing…" : "Yes, remove them"}
+                </button>
+                <button class="ghost" disabled={pruning} onclick={() => (pruneAsked = false)}>
+                  Cancel
+                </button>
+              {:else}
+                <button
+                  class="ghost"
+                  onclick={() => (pruneAsked = true)}
+                  title="Send every identical file but one to the recycle bin"
+                >
+                  Remove extra identical copies
+                </button>
+                <span class="faint tiny">Sources are read-only until you press this.</span>
+              {/if}
+            </div>
+            {#each identicalList.shown as group (group.sources[0])}
+              <button class="suspect" onclick={() => marked = group.sources}>
+                <span class="badge info">{group.sources.length} identical</span>
+                <span class="reason">{formatBytes(group.wasted)} of it repeated.</span>
+                <span class="mono faint truncate">{group.folder}</span>
+                <span class="mono faint truncate">{group.sources.map(baseName).join(" · ")}</span>
+              </button>
+            {/each}
+            {#if identicalList.hidden > 0}
+              <p class="faint tiny">
+                and {identicalList.hidden.toLocaleString()} more not shown.
+              </p>
+            {/if}
+          {:else if duplicates}
+            <p class="faint">No two files hold the same bytes.</p>
+          {/if}
+        </div>
+
+        <div class="copies-group">
+          <p class="group-head">The same picture in more than one folder</p>
+          {#if lookalikes.length > 0}
+            <p>
+              <span class="badge warn">{lookalikeTally.files} files in {lookalikeTally.bursts} sets</span>
+              <span class="faint">
+                The same shot re-saved at another size or quality — a share, a download, an export.
+                Not byte-for-byte, so the button above leaves them alone.
+                {formatBytes(lookalikeTally.extra)} beyond one of each.
+              </span>
+            </p>
+            {#each lookalikeList.shown as found (found.keeper)}
+              <button class="suspect" onclick={() => marked = found.members}>
+                <span class="badge warn">{found.members.length} across {found.folders} folders</span>
+                <span class="reason">{formatBytes(found.extra_bytes)} beyond the largest.</span>
+                <span class="mono faint truncate">{baseName(found.keeper)}</span>
+                <span class="mono faint truncate">{found.members.map(baseName).join(" · ")}</span>
+              </button>
+            {/each}
+            {#if lookalikeList.hidden > 0}
+              <p class="faint tiny">and {lookalikeList.hidden.toLocaleString()} more not shown.</p>
+            {/if}
+          {:else}
+            <p class="faint">No picture turned up twice under different folders.</p>
+          {/if}
+        </div>
+
+        <div class="copies-group">
+          <p class="group-head">Bursts of nearly the same picture</p>
+          {#if bursts.length > 0}
+            <p>
+              <span class="badge info">{burstTally.files} files in {burstTally.bursts} bursts</span>
+              <span class="faint">
+                Shot seconds apart and looking almost alike. These are different pictures, so nothing
+                here is ever removed — {formatBytes(burstTally.extra)} beyond the first of each is
+                what you would save by keeping one.
+              </span>
+            </p>
+            {#each burstList.shown as burst (burst.keeper)}
+              <button class="suspect" onclick={() => marked = burst.members}>
+                <span class="badge info">burst of {burst.members.length}</span>
+                <span class="reason">{formatBytes(burst.extra_bytes)} beyond the first shot.</span>
+                <span class="mono faint truncate">{burst.folder}</span>
+                <span class="mono faint">{burst.taken}</span>
+              </button>
+            {/each}
+            {#if burstList.hidden > 0}
+              <p class="faint tiny">and {burstList.hidden.toLocaleString()} more not shown.</p>
+            {/if}
+          {:else}
+            <p class="faint">No runs of near-identical shots.</p>
+          {/if}
+        </div>
+      {/if}
+    </section>
+  {/if}
+
+  {#if issuesOpen}
+    <section class="issues scroll">
+      <div class="issues-head">
+        <strong>Issues</strong>
+        <button class="ghost" onclick={() => (issuesOpen = false)}>Close</button>
+      </div>
+      {#each suspects as group (group.key)}
+        <button class="suspect" onclick={() => selectSuspects(group)}>
+          <span class="badge danger">{group.files} dates look wrong</span>
+          <span class="reason">Each one {group.reason}.</span>
+          <span class="mono faint truncate">{group.folder}</span>
+          <span class="mono faint">{group.earliest} → {group.latest}</span>
+        </button>
+      {/each}
+      {#each copyFailures as failure (failure.source)}
+        <p><span class="badge danger">copy failed</span> <span class="mono">{failure.source}</span></p>
+      {/each}
+      {#each verifyReport?.issues ?? [] as issue (issue.source + issue.kind)}
+        <p>
+          <span class="badge warn">{issue.kind.replace("_", " ")}</span>
+          <span class="mono">{issue.source}</span>
+        </p>
+      {/each}
+      {#each skipped as item (item.source)}
+        <p><span class="badge info">no date</span> <span class="mono">{item.source}</span></p>
+      {/each}
+      {#if issueCount === 0}
+        <p class="faint">Nothing to report.</p>
+      {/if}
+    </section>
+  {/if}
+
+  <footer>
+    <div class="status truncate">
+      {#if scanProgress}
+        {scanProgress.phase === "counting"
+          ? `Counting files… ${scanProgress.files_seen}`
+          : `Reading dates… ${scanProgress.files_seen} of ${scanProgress.files_total}`}
+      {:else if job === "copy" && copyProgress}
+        Copying {copyProgress.files_done} of {copyProgress.files_total} ·
+        {formatBytes(copyProgress.bytes_done)} of {formatBytes(copyProgress.bytes_total)}
+      {:else if verifyProgress}
+        Checking {verifyProgress.checked} of {verifyProgress.total}
+      {:else if tagProgress}
+        {#if tagProgress.note}
+          {tagProgress.note}&hellip;
+        {:else}
+          Tagging pictures: {tagProgress.done.toLocaleString()} of {tagProgress.total.toLocaleString()}
+        {/if}
+      {:else if error}
+        <span class="error">{error}</span>
+      {:else if notice}
+        {notice}
+      {:else}
+        Ready.
+      {/if}
+    </div>
+
+    {#if job === "copy" && copyProgress && copyProgress.bytes_total > 0}
+      <div class="bar">
+        <div
+          class="fill"
+          style="width: {Math.round((copyProgress.bytes_done / copyProgress.bytes_total) * 100)}%"
+        ></div>
+      </div>
+    {:else if job === "scan" && scanProgress && scanProgress.files_total > 0}
+      <div class="bar">
+        <div
+          class="fill"
+          style="width: {Math.round((scanProgress.files_seen / scanProgress.files_total) * 100)}%"
+        ></div>
+      </div>
+    {:else if tagProgress && !tagProgress.note}
+      <div class="bar" title="Pictures tagged so far">
+        <div class="fill" style="width: {tagShare}%"></div>
+      </div>
+    {/if}
+
+    {#if suspectCount > 0}
+      <button class="ghost warn-text" onclick={() => (issuesOpen = true)}>
+        {suspectCount} suspicious {suspectCount === 1 ? "date" : "dates"}
+      </button>
+    {/if}
+
+    <button class="ghost" onclick={() => (copiesOpen ? (copiesOpen = false) : findCopies())}>
+      Copies
+    </button>
+
+    <button class="ghost" onclick={() => (issuesOpen = !issuesOpen)}>
+      Issues {issueCount > 0 ? `(${issueCount})` : ""}
+    </button>
+
+    {#if versionLabel(version)}
+      <span class="split" aria-hidden="true"></span>
+      <button
+        class="version"
+        title="Open the release this build came from"
+        onclick={() => void openReleases()}
+      >
+        {versionLabel(version)}
+      </button>
+    {/if}
+  </footer>
+</div>
+
+<style>
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 14px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .mark {
+    font-size: 22px;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  h1 {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .brand p {
+    font-size: 11px;
+  }
+
+  .actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  main {
+    display: grid;
+    grid-template-columns:
+      300px var(--tree-pane, 230px) 6px minmax(0, 1fr) 6px
+      var(--preview-pane, 340px);
+    flex: 1;
+    min-height: 0;
+  }
+
+  main.wide {
+    grid-template-columns: 300px minmax(0, 1fr) 6px var(--preview-pane, 340px);
+  }
+
+  .splitter {
+    position: relative;
+    padding: 0;
+    border: none;
+    background: none;
+    appearance: none;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .splitter::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 2px;
+    width: 2px;
+    background: transparent;
+  }
+
+  .splitter:hover::after,
+  .splitter.splitting::after,
+  .splitter:focus-visible::after {
+    background: var(--accent);
+  }
+
+  .splitter:focus-visible {
+    outline: none;
+  }
+
+  .loading {
+    grid-column: 2 / -3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 12px;
+    background: var(--bg-panel);
+  }
+
+  .spinner {
+    width: 13px;
+    height: 13px;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .views {
+    display: flex;
+    gap: 2px;
+    margin-right: 6px;
+  }
+
+  .views button.active {
+    border-color: var(--accent);
+    background: var(--bg-active);
+    color: var(--text);
+  }
+
+  .look {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .look input[type="search"] {
+    width: 220px;
+    padding-block: 9px;
+  }
+
+  .tagbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tree {
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    padding-block: 6px;
+  }
+
+  .placeholder {
+    padding: 20px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .issues {
+    flex-shrink: 0;
+    max-height: 180px;
+    padding: 10px 14px;
+    background: var(--bg-raised);
+    border-top: 1px solid var(--border);
+  }
+
+  .issues-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .issues p {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+    font-size: 12px;
+  }
+
+  .issues .mono {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .copies-group + .copies-group {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .copies-group .group-head {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--text-faint);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .suspect {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 5px 8px;
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+
+  .suspect:hover {
+    border-color: var(--danger);
+  }
+
+  .suspect .reason {
+    color: var(--text);
+  }
+
+  .suspect .faint {
+    font-size: 11px;
+  }
+
+  .warn-text {
+    color: var(--warn);
+  }
+
+  footer {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 10px 6px 14px;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+  }
+
+  .status {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-dim);
+  }
+
+  .error {
+    color: var(--danger);
+  }
+
+  .split {
+    width: 1px;
+    height: 12px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  .version {
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .version:hover,
+  .version:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  .bar.thin {
+    width: 120px;
+    height: 4px;
+  }
+
+  .current {
+    max-width: 220px;
+  }
+
+  .bar {
+    width: 220px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--bg-base);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.15s linear;
+  }
+
+  .prune {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0 10px;
+  }
+
+  .prune .warnText {
+    color: var(--warn, #d98029);
+    font-size: 12px;
+  }
+
+  .prune .danger {
+    border-color: var(--warn, #d98029);
+    color: var(--warn, #d98029);
+  }
+</style>

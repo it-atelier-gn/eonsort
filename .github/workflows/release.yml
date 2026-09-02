@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  checks: write
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: ci
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: eonsort-windows-x64
+            bundle_ext: msi
+
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: eonsort-linux-x64
+            bundle_ext: deb
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: eonsort-macos-arm64
+            bundle_ext: dmg
+
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: eonsort-macos-x64
+            bundle_ext: dmg
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set version from tag
+        shell: bash
+        env:
+          BUNDLE_EXT: ${{ matrix.bundle_ext }}
+        run: |
+          node -e "
+          const fs = require('fs');
+          const raw = process.env.GITHUB_REF_NAME.replace(/^v/, '');
+          const packaged = ['msi', 'deb'].includes(process.env.BUNDLE_EXT);
+          const v = packaged ? raw.replace(/-.*/, '') : raw;
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          pkg.version = v;
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          const tauri = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+          tauri.version = v;
+          fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2) + '\n');
+          const cargo = fs.readFileSync('Cargo.toml', 'utf8');
+          fs.writeFileSync('Cargo.toml', cargo.replace(/^version = \"[^\"]*\"/m, 'version = \"' + v + '\"'));
+          "
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf nasm
+
+      - name: Install NASM (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm
+
+      - name: Install NASM (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build the desktop app
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: npx tauri
+          args: --target ${{ matrix.target }} --features upright,tagging,quality,faces
+
+      - name: Build the command line tool
+        run: cargo build --release -p eonsort-cli --target ${{ matrix.target }}
+
+      - name: Package portable archive (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir portable
+          cp "target/${{ matrix.target }}/release/eonsort-desktop.exe" portable/
+          cp "target/${{ matrix.target }}/release/eonsort.exe" portable/
+          cp -r "target/${{ matrix.target }}/release/models" portable/
+          test -f portable/models/sface.safetensors
+          test -f portable/models/yunet.safetensors
+          7z a "${{ matrix.artifact }}-portable.zip" ./portable/*
+
+      - name: Package command line tool (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -czf "${{ matrix.artifact }}-cli.tar.gz" -C "target/${{ matrix.target }}/release" eonsort
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/msi/*.msi
+            target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            target/${{ matrix.target }}/release/bundle/deb/*.deb
+            target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            ${{ matrix.artifact }}-portable.zip
+            ${{ matrix.artifact }}-cli.tar.gz
+          if-no-files-found: ignore
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            ## Downloads
+
+            | File | Description |
+            |---|---|
+            | `*-setup.exe` | Windows installer (recommended) |
+            | `*.msi` | Windows MSI installer |
+            | `*-portable.zip` | Windows portable — app and `eonsort` CLI, no install needed |
+            | `*.deb` | Debian / Ubuntu package |
+            | `*.AppImage` | Linux portable |
+            | `*.dmg` | macOS disk image (arm64 and x64) |
+            | `*-cli.tar.gz` | `eonsort` command line tool for Linux and macOS |
+
+            > **Windows portable users:** the app needs the [WebView2 runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). It ships with Windows 11 and most Windows 10 systems. The `eonsort` command line tool has no such requirement.

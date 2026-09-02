@@ -1,0 +1,44 @@
+[package]
+name = "eonsort-desktop"
+description = "Sort files into date-based folders"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "eonsort_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = []
+upright = ["eonsort-core/upright"]
+tagging = ["eonsort-core/tagging"]
+quality = ["eonsort-core/quality"]
+faces = ["eonsort-core/faces"]
+screenshot = ["dep:xcap"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+eonsort-core.workspace = true
+base64 = "0.23"
+kamadak-exif.workspace = true
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "tiff",
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+] }
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+trash = "5"
+xcap = { version = "0.9.8", features = ["image"], optional = true }

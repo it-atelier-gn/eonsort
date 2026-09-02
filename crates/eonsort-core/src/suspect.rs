@@ -1,0 +1,931 @@
+use crate::providers::{Detection, Provider};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
+
+pub const EPOCH_WINDOW_SECONDS: i64 = 60;
+pub const RESET_WINDOW_SECONDS: i64 = 86_399;
+pub const RUN_GAP_DAYS: i64 = 30;
+pub const SPREAD_DAYS: i64 = 180;
+pub const WRITE_TOLERANCE_HOURS: i64 = 48;
+pub const CONSENSUS_HOURS: i64 = 24;
+pub const MAX_ZONE_HOURS: i64 = 14;
+pub const NEIGHBOUR_DRIFT_DAYS: i64 = 730;
+pub const IDENTICAL_CLUSTER_MIN: usize = 5;
+pub const SEQUENCE_MIN: usize = 5;
+pub const NEIGHBOUR_MIN: usize = 5;
+pub const MAX_COUNTER_DIGITS: usize = 6;
+pub const SEQUENCE_AGREEMENT_PERCENT: usize = 90;
+pub const SEQUENCE_MIN_GAP_DAYS: i64 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "flag", rename_all = "snake_case")]
+pub enum Flag {
+    CameraEpoch,
+    FutureDate,
+    TakenAfterFileWrite,
+    ProviderSpread {
+        days: i64,
+    },
+    ClockResetRun {
+        anchor: NaiveDateTime,
+        files: usize,
+    },
+    IdenticalTimestampCluster {
+        files: usize,
+    },
+    SequenceOutlier {
+        days: i64,
+        neighbour: String,
+        before: bool,
+    },
+    FarFromNeighbours {
+        years: i64,
+    },
+    TimezoneShift {
+        hours: i64,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Hard,
+    Soft,
+    Note,
+}
+
+impl Flag {
+    pub fn severity(&self) -> Severity {
+        match self {
+            Flag::ProviderSpread { .. } | Flag::SequenceOutlier { .. } => Severity::Soft,
+            Flag::TimezoneShift { .. } => Severity::Note,
+            _ => Severity::Hard,
+        }
+    }
+
+    pub fn describe(&self) -> String {
+        match self {
+            Flag::CameraEpoch => "sits on a camera factory-reset date".to_string(),
+            Flag::FutureDate => "lies in the future".to_string(),
+            Flag::TakenAfterFileWrite => "is later than the file was written".to_string(),
+            Flag::ProviderSpread { days } => format!("sources disagree by {days} days"),
+            Flag::ClockResetRun { anchor, files } => format!(
+                "part of a {files}-file run counting up from {}",
+                anchor.format("%Y-%m-%d %H:%M")
+            ),
+            Flag::IdenticalTimestampCluster { files } => {
+                format!("shared to the second with {files} files")
+            }
+            Flag::SequenceOutlier {
+                days,
+                neighbour,
+                before,
+            } => {
+                let side = if *before { "before" } else { "after" };
+                let order = if *before { "first" } else { "later" };
+                let plural = if *days == 1 { "day" } else { "days" };
+                format!("falls {days} {plural} {side} {neighbour}, which the camera numbered {order}")
+            }
+            Flag::FarFromNeighbours { years } => {
+                format!("{years} years away from the rest of its folder")
+            }
+            Flag::TimezoneShift { hours } => format!(
+                "reads {hours} whole hours from another source, which is the shape of a time zone rather than a wrong date"
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Confidence {
+    Low,
+    Medium,
+    High,
+}
+
+impl Confidence {
+    pub fn label(self) -> &'static str {
+        match self {
+            Confidence::Low => "low",
+            Confidence::Medium => "medium",
+            Confidence::High => "high",
+        }
+    }
+}
+
+pub struct EntryFacts<'a> {
+    pub source: &'a Path,
+    pub taken: NaiveDateTime,
+    pub provider: Provider,
+    pub filesystem: Option<NaiveDateTime>,
+}
+
+pub fn is_camera_epoch(taken: NaiveDateTime) -> bool {
+    at_year_start(taken, EPOCH_WINDOW_SECONDS)
+}
+
+fn is_reset_anchor(taken: NaiveDateTime) -> bool {
+    at_year_start(taken, RESET_WINDOW_SECONDS)
+}
+
+fn at_year_start(taken: NaiveDateTime, window: i64) -> bool {
+    taken.month() == 1 && taken.day() == 1 && i64::from(taken.num_seconds_from_midnight()) <= window
+}
+
+pub fn date_flags(
+    taken: NaiveDateTime,
+    filesystem_latest: Option<NaiveDateTime>,
+    now: NaiveDateTime,
+) -> Vec<Flag> {
+    let mut flags = Vec::new();
+    if is_camera_epoch(taken) {
+        flags.push(Flag::CameraEpoch);
+    }
+    if taken > now {
+        flags.push(Flag::FutureDate);
+    }
+    if let Some(latest) = filesystem_latest {
+        if taken - latest > Duration::hours(WRITE_TOLERANCE_HOURS) {
+            flags.push(Flag::TakenAfterFileWrite);
+        }
+    }
+    flags
+}
+
+pub fn spread(candidates: &[Detection]) -> Option<Flag> {
+    let min = candidates.iter().map(|c| c.taken).min()?;
+    let max = candidates.iter().map(|c| c.taken).max()?;
+    let days = (max - min).num_days();
+    (days > SPREAD_DAYS).then_some(Flag::ProviderSpread { days })
+}
+
+pub fn entry_flags(
+    chosen: NaiveDateTime,
+    candidates: &[Detection],
+    filesystem_latest: Option<NaiveDateTime>,
+    now: NaiveDateTime,
+) -> Vec<Flag> {
+    let mut flags = date_flags(chosen, filesystem_latest, now);
+    flags.extend(spread(candidates));
+    flags.extend(timezone_shift(chosen, candidates));
+    flags
+}
+
+pub fn timezone_shift(chosen: NaiveDateTime, candidates: &[Detection]) -> Option<Flag> {
+    candidates
+        .iter()
+        .filter(|c| c.provider != Provider::Filesystem)
+        .filter_map(|c| {
+            let apart = chosen - c.taken;
+            let hours = apart.num_hours();
+            (hours != 0
+                && hours.abs() <= MAX_ZONE_HOURS
+                && apart == chrono::TimeDelta::hours(hours))
+            .then_some(Flag::TimezoneShift { hours: hours.abs() })
+        })
+        .next()
+}
+
+pub fn confidence(candidates: &[Detection], flags: &[Flag]) -> Confidence {
+    if flags.iter().any(|f| f.severity() == Severity::Hard) {
+        return Confidence::Low;
+    }
+    if flags.iter().all(|f| f.severity() == Severity::Note) && corroborated(candidates) {
+        return Confidence::High;
+    }
+    Confidence::Medium
+}
+
+fn corroborated(candidates: &[Detection]) -> bool {
+    candidates.iter().enumerate().any(|(i, a)| {
+        candidates
+            .iter()
+            .skip(i + 1)
+            .any(|b| (a.taken - b.taken).num_hours().abs() < CONSENSUS_HOURS)
+    })
+}
+
+pub fn cross_file_flags(entries: &[EntryFacts<'_>]) -> Vec<Vec<Flag>> {
+    let mut out = vec![Vec::new(); entries.len()];
+    let mut groups: HashMap<&Path, Vec<usize>> = HashMap::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let parent = entry.source.parent().unwrap_or_else(|| Path::new(""));
+        groups.entry(parent).or_default().push(index);
+    }
+
+    for indices in groups.values() {
+        identical_clusters(entries, indices, &mut out);
+        clock_reset_run(entries, indices, &mut out);
+        far_from_neighbours(entries, indices, &mut out);
+        sequence_outliers(entries, indices, &mut out);
+    }
+    out
+}
+
+fn identical_clusters(entries: &[EntryFacts<'_>], indices: &[usize], out: &mut [Vec<Flag>]) {
+    let mut buckets: HashMap<NaiveDateTime, Vec<usize>> = HashMap::new();
+    for &index in indices {
+        buckets.entry(entries[index].taken).or_default().push(index);
+    }
+    for members in buckets.values() {
+        if members.len() < IDENTICAL_CLUSTER_MIN {
+            continue;
+        }
+        for &index in members {
+            out[index].push(Flag::IdenticalTimestampCluster {
+                files: members.len(),
+            });
+        }
+    }
+}
+
+fn clock_reset_run(entries: &[EntryFacts<'_>], indices: &[usize], out: &mut [Vec<Flag>]) {
+    let mut device: Vec<usize> = indices
+        .iter()
+        .copied()
+        .filter(|&i| entries[i].provider != Provider::Filesystem)
+        .collect();
+    if device.len() < 2 {
+        return;
+    }
+    device.sort_by_key(|&i| entries[i].taken);
+
+    let anchor = entries[device[0]].taken;
+    if !is_reset_anchor(anchor) {
+        return;
+    }
+
+    let mut run = vec![device[0]];
+    for &index in &device[1..] {
+        let previous = entries[*run.last().unwrap()].taken;
+        if (entries[index].taken - previous).num_days() > RUN_GAP_DAYS {
+            break;
+        }
+        run.push(index);
+    }
+    if run.len() < 2 {
+        return;
+    }
+
+    let latest = entries[*run.last().unwrap()].taken;
+    let mut written: Vec<NaiveDateTime> =
+        run.iter().filter_map(|&i| entries[i].filesystem).collect();
+    if written.is_empty() {
+        return;
+    }
+    written.sort();
+    let reference = written[written.len() / 2];
+    if (reference - latest).num_days() <= SPREAD_DAYS {
+        return;
+    }
+
+    for &index in &run {
+        out[index].push(Flag::ClockResetRun {
+            anchor,
+            files: run.len(),
+        });
+    }
+}
+
+fn far_from_neighbours(entries: &[EntryFacts<'_>], indices: &[usize], out: &mut [Vec<Flag>]) {
+    if indices.len() < NEIGHBOUR_MIN {
+        return;
+    }
+    let mut taken: Vec<NaiveDateTime> = indices.iter().map(|&i| entries[i].taken).collect();
+    taken.sort();
+    let median = taken[taken.len() / 2];
+
+    for &index in indices {
+        let drift = (entries[index].taken - median).num_days().abs();
+        if drift < NEIGHBOUR_DRIFT_DAYS {
+            continue;
+        }
+        let Some(written) = entries[index].filesystem else {
+            continue;
+        };
+        if (written - median).num_days().abs() < NEIGHBOUR_DRIFT_DAYS {
+            out[index].push(Flag::FarFromNeighbours { years: drift / 365 });
+        }
+    }
+}
+
+fn sequence_outliers(entries: &[EntryFacts<'_>], indices: &[usize], out: &mut [Vec<Flag>]) {
+    let mut numbered: Vec<(u64, usize)> = indices
+        .iter()
+        .filter_map(|&i| counter(entries[i].source).map(|n| (n, i)))
+        .collect();
+    if numbered.len() < SEQUENCE_MIN {
+        return;
+    }
+    numbered.sort();
+
+    let by_counter: Vec<usize> = numbered.iter().map(|&(_, i)| i).collect();
+    let mut by_date = by_counter.clone();
+    by_date.sort_by_key(|&i| entries[i].taken);
+
+    let date_rank: HashMap<usize, usize> = by_date
+        .iter()
+        .enumerate()
+        .map(|(rank, &index)| (index, rank))
+        .collect();
+
+    let tolerance = by_counter.len() / 2;
+    let strayed: Vec<bool> = by_counter
+        .iter()
+        .enumerate()
+        .map(|(rank, index)| date_rank[index].abs_diff(rank) > tolerance)
+        .collect();
+    if !strayed.contains(&true) || !counter_tracks_time(entries, &by_counter, &strayed) {
+        return;
+    }
+
+    for rank in 0..by_counter.len() {
+        if !strayed[rank] {
+            continue;
+        }
+        if let Some(flag) = against_neighbours(entries, &by_counter, &strayed, rank) {
+            out[by_counter[rank]].push(flag);
+        }
+    }
+}
+
+fn counter_tracks_time(entries: &[EntryFacts<'_>], by_counter: &[usize], strayed: &[bool]) -> bool {
+    let steady: Vec<usize> = by_counter
+        .iter()
+        .zip(strayed)
+        .filter(|&(_, &stray)| !stray)
+        .map(|(&index, _)| index)
+        .collect();
+    if steady.len() < SEQUENCE_MIN {
+        return false;
+    }
+    let forward = steady
+        .windows(2)
+        .filter(|pair| entries[pair[1]].taken >= entries[pair[0]].taken)
+        .count();
+    forward * 100 >= (steady.len() - 1) * SEQUENCE_AGREEMENT_PERCENT
+}
+
+fn against_neighbours(
+    entries: &[EntryFacts<'_>],
+    by_counter: &[usize],
+    strayed: &[bool],
+    rank: usize,
+) -> Option<Flag> {
+    let taken = entries[by_counter[rank]].taken;
+    let steady = |slice: &[usize], flags: &[bool], from_end: bool| -> Option<usize> {
+        let mut pairs: Vec<usize> = slice
+            .iter()
+            .zip(flags)
+            .filter(|&(_, &stray)| !stray)
+            .map(|(&index, _)| index)
+            .collect();
+        if from_end {
+            pairs.pop()
+        } else {
+            pairs.first().copied()
+        }
+    };
+
+    let earlier = steady(&by_counter[..rank], &strayed[..rank], true);
+    let later = steady(&by_counter[rank + 1..], &strayed[rank + 1..], false);
+
+    let mut widest = SEQUENCE_MIN_GAP_DAYS - 1;
+    let mut flag = None;
+    if let Some(index) = earlier {
+        let days = (entries[index].taken - taken).num_days();
+        if days > widest {
+            widest = days;
+            flag = Some(Flag::SequenceOutlier {
+                days,
+                neighbour: file_name(entries[index].source),
+                before: true,
+            });
+        }
+    }
+    if let Some(index) = later {
+        let days = (taken - entries[index].taken).num_days();
+        if days > widest {
+            flag = Some(Flag::SequenceOutlier {
+                days,
+                neighbour: file_name(entries[index].source),
+                before: false,
+            });
+        }
+    }
+    flag
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn counter(path: &Path) -> Option<u64> {
+    let stem = path.file_stem()?.to_str()?;
+    if holds_a_date(stem) {
+        return None;
+    }
+    let tail: Vec<char> = stem
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if tail.len() < 3 || tail.len() > MAX_COUNTER_DIGITS {
+        return None;
+    }
+    tail.iter().rev().collect::<String>().parse().ok()
+}
+
+fn holds_a_date(stem: &str) -> bool {
+    let chars: Vec<char> = stem.chars().collect();
+    let mut start = 0;
+    while start < chars.len() {
+        if !chars[start].is_ascii_digit() {
+            start += 1;
+            continue;
+        }
+        let mut end = start;
+        while end < chars.len() && chars[end].is_ascii_digit() {
+            end += 1;
+        }
+        if end - start >= 8 {
+            let run: String = chars[start..start + 8].iter().collect();
+            if looks_like_a_day(&run) {
+                return true;
+            }
+        }
+        start = end;
+    }
+    false
+}
+
+fn looks_like_a_day(digits: &str) -> bool {
+    let year: i32 = digits[..4].parse().unwrap_or(0);
+    let month: u32 = digits[4..6].parse().unwrap_or(0);
+    let day: u32 = digits[6..8].parse().unwrap_or(0);
+    (1900..=2100).contains(&year) && NaiveDate::from_ymd_opt(year, month, day).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+    use std::path::PathBuf;
+
+    fn at(y: i32, m: u32, d: u32, hh: u32, mm: u32, ss: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(hh, mm, ss)
+            .unwrap()
+    }
+
+    fn detection(provider: Provider, taken: NaiveDateTime) -> Detection {
+        Detection {
+            provider,
+            info: None,
+            taken,
+        }
+    }
+
+    #[test]
+    fn a_whole_hour_apart_reads_as_a_time_zone_rather_than_a_wrong_date() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Media, at(2019, 5, 14, 7, 22, 3)),
+        ];
+
+        let flag = timezone_shift(at(2019, 5, 14, 9, 22, 3), &candidates).unwrap();
+        assert_eq!(flag, Flag::TimezoneShift { hours: 2 });
+        assert_eq!(flag.severity(), Severity::Note);
+    }
+
+    #[test]
+    fn a_time_zone_note_still_leaves_the_date_trusted() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Media, at(2019, 5, 14, 7, 22, 3)),
+        ];
+        let flags = entry_flags(
+            at(2019, 5, 14, 9, 22, 3),
+            &candidates,
+            Some(at(2019, 5, 15, 0, 0, 0)),
+            at(2026, 1, 1, 0, 0, 0),
+        );
+
+        assert_eq!(flags, vec![Flag::TimezoneShift { hours: 2 }]);
+        assert_eq!(confidence(&candidates, &flags), Confidence::High);
+    }
+
+    #[test]
+    fn a_ragged_difference_is_not_a_time_zone() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Media, at(2019, 5, 14, 7, 52, 3)),
+        ];
+
+        assert!(timezone_shift(at(2019, 5, 14, 9, 22, 3), &candidates).is_none());
+    }
+
+    #[test]
+    fn the_file_system_time_is_never_read_as_a_time_zone() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Filesystem, at(2019, 5, 14, 6, 22, 3)),
+        ];
+
+        assert!(timezone_shift(at(2019, 5, 14, 9, 22, 3), &candidates).is_none());
+    }
+
+    #[test]
+    fn a_gap_wider_than_any_time_zone_is_left_alone() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 5, 14, 9, 22, 3)),
+            detection(Provider::Media, at(2019, 5, 13, 9, 22, 3)),
+        ];
+
+        assert!(timezone_shift(at(2019, 5, 14, 9, 22, 3), &candidates).is_none());
+    }
+
+    #[test]
+    fn recognises_the_common_camera_reset_dates() {
+        for year in [1970, 1980, 2000, 2002, 2003, 2004, 2007, 2010, 2015, 2016] {
+            assert!(
+                is_camera_epoch(at(year, 1, 1, 0, 0, 0)),
+                "{year}-01-01 00:00:00 should look like a reset"
+            );
+        }
+        assert!(is_camera_epoch(at(2003, 1, 1, 0, 0, 42)));
+    }
+
+    #[test]
+    fn a_real_new_year_photo_is_not_a_reset_date() {
+        assert!(!is_camera_epoch(at(2019, 1, 1, 14, 32, 10)));
+        assert!(!is_camera_epoch(at(2019, 1, 1, 0, 2, 0)));
+        assert!(!is_camera_epoch(at(2019, 7, 4, 0, 0, 0)));
+    }
+
+    #[test]
+    fn flags_a_date_in_the_future() {
+        let now = at(2026, 8, 6, 12, 0, 0);
+        assert!(date_flags(at(2030, 1, 5, 9, 0, 0), None, now).contains(&Flag::FutureDate));
+        assert!(!date_flags(at(2020, 1, 5, 9, 0, 0), None, now).contains(&Flag::FutureDate));
+    }
+
+    #[test]
+    fn flags_a_date_later_than_the_file_was_written() {
+        let now = at(2026, 8, 6, 12, 0, 0);
+        let written = at(2019, 7, 4, 10, 0, 0);
+        let flags = date_flags(at(2019, 8, 1, 10, 0, 0), Some(written), now);
+        assert!(flags.contains(&Flag::TakenAfterFileWrite));
+    }
+
+    #[test]
+    fn tolerates_timezone_sized_differences_against_the_write_time() {
+        let now = at(2026, 8, 6, 12, 0, 0);
+        let written = at(2019, 7, 4, 10, 0, 0);
+        let flags = date_flags(at(2019, 7, 5, 20, 0, 0), Some(written), now);
+        assert!(!flags.contains(&Flag::TakenAfterFileWrite));
+    }
+
+    #[test]
+    fn reports_the_spread_between_disagreeing_providers() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2003, 1, 1, 0, 0, 0)),
+            detection(Provider::Filesystem, at(2019, 7, 4, 10, 0, 0)),
+        ];
+        assert!(matches!(
+            spread(&candidates),
+            Some(Flag::ProviderSpread { days }) if days > 5000
+        ));
+
+        let close = vec![
+            detection(Provider::Exif, at(2019, 7, 4, 10, 0, 0)),
+            detection(Provider::Filesystem, at(2019, 7, 4, 11, 0, 0)),
+        ];
+        assert!(spread(&close).is_none());
+    }
+
+    #[test]
+    fn confidence_is_low_for_any_hard_flag() {
+        let candidates = vec![detection(Provider::Exif, at(2003, 1, 1, 0, 0, 0))];
+        assert_eq!(
+            confidence(&candidates, &[Flag::CameraEpoch]),
+            Confidence::Low
+        );
+    }
+
+    #[test]
+    fn confidence_is_high_when_two_providers_corroborate() {
+        let candidates = vec![
+            detection(Provider::Exif, at(2019, 7, 4, 10, 0, 0)),
+            detection(Provider::Filename, at(2019, 7, 4, 10, 0, 0)),
+        ];
+        assert_eq!(confidence(&candidates, &[]), Confidence::High);
+    }
+
+    #[test]
+    fn confidence_is_medium_for_a_lone_provider_or_a_wide_spread() {
+        let lone = vec![detection(Provider::Filesystem, at(2019, 7, 4, 10, 0, 0))];
+        assert_eq!(confidence(&lone, &[]), Confidence::Medium);
+
+        let wide = vec![
+            detection(Provider::Exif, at(2019, 7, 4, 10, 0, 0)),
+            detection(Provider::Filesystem, at(2023, 1, 1, 0, 0, 0)),
+        ];
+        let flags = vec![Flag::ProviderSpread { days: 1277 }];
+        assert_eq!(confidence(&wide, &flags), Confidence::Medium);
+    }
+
+    fn facts<'a>(
+        paths: &'a [PathBuf],
+        takens: &[NaiveDateTime],
+        provider: Provider,
+        written: Option<NaiveDateTime>,
+    ) -> Vec<EntryFacts<'a>> {
+        paths
+            .iter()
+            .zip(takens)
+            .map(|(source, &taken)| EntryFacts {
+                source,
+                taken,
+                provider,
+                filesystem: written,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn flags_a_whole_run_counting_up_from_a_reset_date() {
+        let paths: Vec<PathBuf> = (0..6)
+            .map(|i| PathBuf::from(format!("/trip/IMG_{:04}.jpg", 100 + i)))
+            .collect();
+        let takens: Vec<NaiveDateTime> = (0..6).map(|i| at(2003, 1, 1, 9, i * 3, 0)).collect();
+        let entries = facts(
+            &paths,
+            &takens,
+            Provider::Exif,
+            Some(at(2019, 7, 4, 10, 0, 0)),
+        );
+
+        let flags = cross_file_flags(&entries);
+        for per_entry in &flags {
+            assert!(per_entry
+                .iter()
+                .any(|f| matches!(f, Flag::ClockResetRun { files: 6, .. })));
+        }
+    }
+
+    #[test]
+    fn a_new_year_folder_whose_files_were_written_then_is_left_alone() {
+        let paths: Vec<PathBuf> = (0..6)
+            .map(|i| PathBuf::from(format!("/party/IMG_{:04}.jpg", 100 + i)))
+            .collect();
+        let takens: Vec<NaiveDateTime> = (0..6).map(|i| at(2019, 1, 1, 0, i * 3, 0)).collect();
+        let entries = facts(
+            &paths,
+            &takens,
+            Provider::Exif,
+            Some(at(2019, 1, 1, 2, 0, 0)),
+        );
+
+        let flags = cross_file_flags(&entries);
+        assert!(flags
+            .iter()
+            .all(|f| !f.iter().any(|x| matches!(x, Flag::ClockResetRun { .. }))));
+    }
+
+    #[test]
+    fn a_correctly_dated_file_in_the_folder_does_not_hide_the_run() {
+        let mut paths: Vec<PathBuf> = (0..6)
+            .map(|i| PathBuf::from(format!("/trip/IMG_{:04}.jpg", 100 + i)))
+            .collect();
+        let mut takens: Vec<NaiveDateTime> = (0..6).map(|i| at(2003, 1, 1, 9, i * 7, 0)).collect();
+        paths.push(PathBuf::from("/trip/IMG_0200.jpg"));
+        takens.push(at(2019, 7, 4, 10, 11, 12));
+
+        let entries = facts(
+            &paths,
+            &takens,
+            Provider::Filename,
+            Some(at(2019, 7, 4, 18, 30, 0)),
+        );
+
+        let flags = cross_file_flags(&entries);
+        for stuck in &flags[..6] {
+            assert!(stuck
+                .iter()
+                .any(|f| matches!(f, Flag::ClockResetRun { files: 6, .. })));
+        }
+        assert!(!flags[6]
+            .iter()
+            .any(|f| matches!(f, Flag::ClockResetRun { .. })));
+    }
+
+    #[test]
+    fn a_correctly_dated_folder_is_left_alone() {
+        let paths: Vec<PathBuf> = (0..6)
+            .map(|i| PathBuf::from(format!("/trip/IMG_{:04}.jpg", 100 + i)))
+            .collect();
+        let takens: Vec<NaiveDateTime> = (0..6).map(|i| at(2019, 7, 4, 10, i * 3, 0)).collect();
+        let entries = facts(
+            &paths,
+            &takens,
+            Provider::Exif,
+            Some(at(2019, 7, 4, 10, 0, 0)),
+        );
+
+        assert!(cross_file_flags(&entries).iter().all(|f| f.is_empty()));
+    }
+
+    #[test]
+    fn flags_files_frozen_on_one_identical_timestamp() {
+        let paths: Vec<PathBuf> = (0..5)
+            .map(|i| PathBuf::from(format!("/dump/a{i}.jpg")))
+            .collect();
+        let takens = vec![at(2015, 1, 1, 0, 0, 0); 5];
+        let entries = facts(&paths, &takens, Provider::Media, None);
+
+        let flags = cross_file_flags(&entries);
+        assert!(flags.iter().all(|f| f
+            .iter()
+            .any(|x| matches!(x, Flag::IdenticalTimestampCluster { files: 5 }))));
+    }
+
+    #[test]
+    fn flags_a_single_file_stranded_far_from_its_folder() {
+        let paths: Vec<PathBuf> = (0..6)
+            .map(|i| PathBuf::from(format!("/trip/scan{i}.tif")))
+            .collect();
+        let mut takens: Vec<NaiveDateTime> = (0..6).map(|i| at(2019, 7, 4, 10, i * 3, 0)).collect();
+        takens[3] = at(2004, 6, 1, 8, 0, 0);
+
+        let mut entries = facts(&paths, &takens, Provider::Exif, None);
+        for entry in entries.iter_mut() {
+            entry.filesystem = Some(at(2019, 7, 4, 10, 0, 0));
+        }
+
+        let flags = cross_file_flags(&entries);
+        assert!(flags[3]
+            .iter()
+            .any(|f| matches!(f, Flag::FarFromNeighbours { .. })));
+        assert!(flags[0]
+            .iter()
+            .all(|f| !matches!(f, Flag::FarFromNeighbours { .. })));
+    }
+
+    fn sequence_flag(flags: &[Flag]) -> Option<&Flag> {
+        flags
+            .iter()
+            .find(|f| matches!(f, Flag::SequenceOutlier { .. }))
+    }
+
+    #[test]
+    fn flags_a_file_that_breaks_the_camera_counter_order() {
+        let paths: Vec<PathBuf> = (0..7)
+            .map(|i| PathBuf::from(format!("/cam/DSC_{:04}.jpg", 200 + i)))
+            .collect();
+        let mut takens: Vec<NaiveDateTime> = (0..7).map(|i| at(2019, 7, 4, 10, i * 5, 0)).collect();
+        takens[0] = at(2019, 7, 14, 10, 0, 0);
+
+        let entries = facts(&paths, &takens, Provider::Exif, None);
+        let flags = cross_file_flags(&entries);
+        assert_eq!(
+            sequence_flag(&flags[0]),
+            Some(&Flag::SequenceOutlier {
+                days: 9,
+                neighbour: "DSC_0201.jpg".to_string(),
+                before: false,
+            })
+        );
+        assert!(sequence_flag(&flags[3]).is_none());
+    }
+
+    #[test]
+    fn names_the_neighbour_and_the_size_of_the_gap() {
+        let flag = Flag::SequenceOutlier {
+            days: 9,
+            neighbour: "DSC_0201.jpg".to_string(),
+            before: false,
+        };
+        assert_eq!(
+            flag.describe(),
+            "falls 9 days after DSC_0201.jpg, which the camera numbered later"
+        );
+
+        let ahead = Flag::SequenceOutlier {
+            days: 1,
+            neighbour: "DSC_0199.jpg".to_string(),
+            before: true,
+        };
+        assert_eq!(
+            ahead.describe(),
+            "falls 1 day before DSC_0199.jpg, which the camera numbered first"
+        );
+    }
+
+    #[test]
+    fn a_counter_out_of_order_does_not_alone_call_the_date_wrong() {
+        let flag = Flag::SequenceOutlier {
+            days: 9,
+            neighbour: "DSC_0201.jpg".to_string(),
+            before: false,
+        };
+        assert_eq!(flag.severity(), Severity::Soft);
+
+        let candidates = vec![detection(Provider::Exif, at(2019, 7, 14, 10, 0, 0))];
+        assert_ne!(confidence(&candidates, &[flag]), Confidence::Low);
+    }
+
+    #[test]
+    fn an_hour_out_of_order_is_not_worth_a_word() {
+        let paths: Vec<PathBuf> = (0..7)
+            .map(|i| PathBuf::from(format!("/cam/DSC_{:04}.jpg", 200 + i)))
+            .collect();
+        let mut takens: Vec<NaiveDateTime> = (0..7).map(|i| at(2019, 7, 4, 10, i * 5, 0)).collect();
+        takens[0] = at(2019, 7, 4, 23, 0, 0);
+
+        let entries = facts(&paths, &takens, Provider::Exif, None);
+        let flags = cross_file_flags(&entries);
+        assert!(flags.iter().all(|f| sequence_flag(f).is_none()));
+    }
+
+    #[test]
+    fn does_not_read_a_timestamp_in_a_file_name_as_a_camera_counter() {
+        let paths: Vec<PathBuf> = [
+            "/cam/IMG_20250608_154559.jpg",
+            "/cam/IMG_20250609_140555.jpg",
+            "/cam/IMG_20250615_154340.jpg",
+            "/cam/IMG_20250620_142926.jpg",
+            "/cam/IMG_20250620_191625.jpg",
+            "/cam/IMG_20250620_205444.jpg",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        let takens = vec![
+            at(2025, 6, 8, 15, 45, 59),
+            at(2025, 6, 9, 14, 5, 55),
+            at(2025, 6, 15, 15, 43, 40),
+            at(2025, 6, 20, 14, 29, 26),
+            at(2025, 6, 20, 19, 16, 25),
+            at(2025, 6, 20, 20, 54, 44),
+        ];
+
+        for provider in [Provider::Filename, Provider::Exif] {
+            let entries = facts(&paths, &takens, provider, None);
+            let flags = cross_file_flags(&entries);
+            assert!(
+                flags.iter().all(|f| sequence_flag(f).is_none()),
+                "{provider:?} read the time of day as a camera counter"
+            );
+        }
+    }
+
+    #[test]
+    fn numbers_that_ignore_the_clock_are_not_read_as_a_counter_at_all() {
+        let paths: Vec<PathBuf> = [
+            "/cam/090000.jpg",
+            "/cam/100000.jpg",
+            "/cam/110000.jpg",
+            "/cam/120000.jpg",
+            "/cam/130000.jpg",
+            "/cam/140000.jpg",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        let takens = vec![
+            at(2025, 6, 20, 9, 0, 0),
+            at(2025, 6, 10, 10, 0, 0),
+            at(2025, 6, 25, 11, 0, 0),
+            at(2025, 6, 5, 12, 0, 0),
+            at(2025, 6, 28, 13, 0, 0),
+            at(2025, 6, 1, 14, 0, 0),
+        ];
+
+        let entries = facts(&paths, &takens, Provider::Exif, None);
+        let flags = cross_file_flags(&entries);
+        assert!(flags.iter().all(|f| sequence_flag(f).is_none()));
+    }
+
+    #[test]
+    fn reads_a_trailing_camera_counter() {
+        assert_eq!(counter(Path::new("/cam/DSC_0123.jpg")), Some(123));
+        assert_eq!(counter(Path::new("/cam/100_1234.jpg")), Some(1234));
+        assert_eq!(counter(Path::new("/cam/holiday.jpg")), None);
+        assert_eq!(counter(Path::new("/cam/a12.jpg")), None);
+    }
+
+    #[test]
+    fn a_date_in_the_stem_is_never_a_camera_counter() {
+        assert_eq!(counter(Path::new("/cam/IMG_20230506_101112.jpg")), None);
+        assert_eq!(counter(Path::new("/cam/PXL_20211203_181510123.jpg")), None);
+        assert_eq!(counter(Path::new("/cam/20250615154340.jpg")), None);
+        assert_eq!(counter(Path::new("/cam/IMG_20250615.jpg")), None);
+        assert_eq!(counter(Path::new("/cam/DSC_12345678.jpg")), None);
+    }
+}

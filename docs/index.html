@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>eonsort: sort files by the date they were actually made</title>
+<meta name="description" content="eonsort reads every independent source for when a file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. The full result is shown before anything is copied. Scanning and copying only ever read your sources." />
+<meta name="theme-color" content="#06121f" />
+<link rel="icon" href="favicon.png" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<meta property="og:title" content="eonsort: sort files by the date they were actually made" />
+<meta property="og:description" content="Every date source, cross-checked. The complete destination tree is shown as a preview before a byte is copied. Scanning and copying only ever read your sources." />
+<meta property="og:image" content="https://it-atelier-gn.github.io/eonsort/screenshot.png" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#06121f;
+    --bg-2:#081726;
+    --card:#0c2036;
+    --card-2:#0e243c;
+    --border:rgba(180,210,230,0.14);
+    --border-soft:rgba(180,210,230,0.08);
+    --ink:#eef4f8;
+    --ink-dim:#9fb7c8;
+    --ink-faint:#5c7488;
+    --cyan:#38c4f2;
+    --cyan-ink:#04141c;
+    --amber:#f2b840;
+    --red:#fa525c;
+    --green:#8cf29e;
+    --c-filename:#3987e5;
+    --c-exif:#d95926;
+    --c-media:#199e70;
+    --c-vision:#c98500;
+    --c-filesystem:#d55181;
+    --serif:'Fraunces', ui-serif, Georgia, serif;
+    --mono:'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    --sans:'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --maxw:1180px;
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+
+  ::selection{ background:var(--cyan); color:var(--cyan-ink); }
+
+  ::-webkit-scrollbar{ width:11px; }
+  ::-webkit-scrollbar-track{ background:var(--bg); }
+  ::-webkit-scrollbar-thumb{ background:#173049; border:3px solid var(--bg); border-radius:8px; }
+  ::-webkit-scrollbar-thumb:hover{ background:#204268; }
+
+  a{ color:inherit; }
+
+  .wrap{ max-width:var(--maxw); margin:0 auto; padding:0 32px; }
+
+  /* film grain overlay */
+  .grain{
+    position:fixed; inset:0; z-index:999; pointer-events:none;
+    opacity:0.05; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+
+  /* vignette + backdrop glow */
+  .glow{
+    position:fixed; inset:0; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(ellipse 900px 600px at 18% -10%, rgba(56,196,242,0.14), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 100% 10%, rgba(250,82,92,0.08), transparent 55%),
+      radial-gradient(ellipse 1200px 900px at 50% 120%, rgba(56,196,242,0.06), transparent 60%);
+  }
+
+  code, .mono{ font-family:var(--mono); }
+
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:12.5px;
+    letter-spacing:0.16em;
+    text-transform:uppercase;
+    color:var(--cyan);
+    display:flex; align-items:center; gap:10px;
+    margin:0 0 18px;
+  }
+  .eyebrow::before{
+    content:""; width:26px; height:1px; background:var(--cyan); opacity:.6;
+  }
+
+  h1,h2,h3{ font-family:var(--serif); font-weight:600; margin:0; letter-spacing:-0.01em; }
+
+  /* ---------- NAV ---------- */
+  header{
+    position:sticky; top:0; z-index:500;
+    backdrop-filter:blur(14px) saturate(140%);
+    background:rgba(6,18,31,0.72);
+    border-bottom:1px solid var(--border-soft);
+  }
+  nav.wrap{
+    display:flex; align-items:center; justify-content:space-between;
+    height:68px;
+  }
+  .brand{ display:flex; align-items:center; gap:11px; font-family:var(--mono); font-weight:600; font-size:16px; letter-spacing:0.01em; text-decoration:none; }
+  .brand .mark{
+    width:26px; height:26px; border-radius:7px;
+    background:linear-gradient(160deg,#57d4f5,#1a86b8);
+    position:relative; flex:none;
+    box-shadow:0 2px 8px rgba(56,196,242,0.35);
+  }
+  .brand .mark i{ position:absolute; left:5px; right:5px; height:3px; background:#06121f; border-radius:1px; }
+  .brand .mark i:nth-child(1){ top:6px; right:7px; }
+  .brand .mark i:nth-child(2){ top:11.5px; right:10px; }
+  .brand .mark i:nth-child(3){ top:17px; right:13px; }
+
+  nav .links{ display:flex; align-items:center; gap:30px; font-size:14px; color:var(--ink-dim); }
+  nav .links a{ text-decoration:none; transition:color .15s ease; position:relative; }
+  nav .links a:hover{ color:var(--ink); }
+  nav .links a.cta{
+    color:var(--cyan-ink); background:var(--cyan); padding:8px 16px; border-radius:7px;
+    font-family:var(--mono); font-weight:600; font-size:13px;
+  }
+  .navlinks-mobile-hide{ display:flex; gap:30px; align-items:center; }
+  @media (max-width:760px){ .navlinks-mobile-hide a:not(.cta){ display:none; } }
+
+  /* ---------- HERO ---------- */
+  .hero{ position:relative; padding:108px 0 90px; overflow:hidden; }
+  .hero-grid{ display:grid; grid-template-columns:1.15fr 0.85fr; gap:40px; align-items:center; }
+  @media (max-width:920px){ .hero-grid{ grid-template-columns:1fr; } }
+
+  .drift-field{ position:absolute; inset:0; z-index:0; pointer-events:none; }
+  .drift{
+    position:absolute; font-family:var(--mono); font-size:12.5px; color:var(--ink-faint);
+    opacity:0; white-space:nowrap;
+    animation:driftUp linear infinite;
+  }
+  @keyframes driftUp{
+    0%{ opacity:0; transform:translateY(20px); }
+    8%{ opacity:0.42; }
+    88%{ opacity:0.3; }
+    100%{ opacity:0; transform:translateY(-180px); }
+  }
+
+  .hero h1{
+    position:relative; z-index:2;
+    font-size:clamp(2.5rem, 5.2vw, 4.1rem);
+    line-height:1.04;
+    font-weight:500;
+  }
+  .hero h1 em{
+    font-style:italic; font-weight:600;
+    background:linear-gradient(100deg,#7fe0fb,#38c4f2 55%,#1c8bb8);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .hero .lede{
+    position:relative; z-index:2;
+    margin:26px 0 36px; color:var(--ink-dim); font-size:17px; max-width:52ch;
+  }
+  .hero .lede strong{ color:var(--ink); font-weight:600; }
+
+  .cta-row{ position:relative; z-index:2; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .btn{
+    display:inline-flex; align-items:center; gap:9px;
+    font-family:var(--mono); font-weight:600; font-size:14px;
+    padding:13px 22px; border-radius:8px; text-decoration:none;
+    transition:transform .15s ease, box-shadow .15s ease, background .15s ease;
+  }
+  .btn-primary{ background:var(--cyan); color:var(--cyan-ink); box-shadow:0 10px 24px -8px rgba(56,196,242,0.55); }
+  .btn-primary:hover{ transform:translateY(-2px); box-shadow:0 14px 28px -8px rgba(56,196,242,0.7); }
+  .btn-ghost{ background:transparent; color:var(--ink); border:1px solid var(--border); }
+  .btn-ghost:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .hero .fineprint{ position:relative; z-index:2; margin-top:16px; font-family:var(--mono); font-size:12.5px; color:var(--ink-faint); }
+
+  /* stamps */
+  .stamp-stage{ position:relative; z-index:2; height:340px; }
+  .stamp{
+    position:absolute; width:250px;
+    border:2px solid; border-radius:10px;
+    padding:16px 18px; font-family:var(--mono);
+    background:rgba(6,18,31,0.55); backdrop-filter:blur(6px);
+    opacity:0; transform:scale(2.4) rotate(0deg);
+  }
+  .stamp .tag{ font-size:10.5px; letter-spacing:.14em; opacity:.75; }
+  .stamp .verdict{ font-size:22px; font-weight:700; margin:6px 0 10px; letter-spacing:.03em; }
+  .stamp .ts{ font-size:13px; }
+  .stamp .why{ font-size:11.5px; margin-top:8px; opacity:.7; line-height:1.5; }
+
+  .stamp-reject{
+    border-color:var(--red); color:var(--red);
+    top:6%; left:2%;
+    animation:stampIn .6s cubic-bezier(.2,1.4,.4,1) .35s forwards;
+  }
+  .stamp-reject .ts{ text-decoration:line-through; color:var(--ink-dim); }
+  .stamp-confirm{
+    border-color:var(--cyan); color:var(--cyan);
+    top:44%; left:26%;
+    animation:stampIn2 .6s cubic-bezier(.2,1.4,.4,1) .75s forwards;
+  }
+  .stamp-confirm .ts{ color:var(--ink); }
+  @keyframes stampIn{ 0%{ opacity:0; transform:scale(2.4) rotate(0deg);} 60%{opacity:1;} 100%{ opacity:1; transform:scale(1) rotate(-7deg);} }
+  @keyframes stampIn2{ 0%{ opacity:0; transform:scale(2.4) rotate(0deg);} 60%{opacity:1;} 100%{ opacity:1; transform:scale(1) rotate(5deg);} }
+
+  .stamp-card{
+    position:absolute; top:16%; left:14%; width:280px;
+    padding:20px; border-radius:4px;
+    background:var(--card); border:1px solid var(--border);
+    box-shadow:0 30px 60px -20px rgba(0,0,0,.7);
+    font-family:var(--mono); font-size:12px; color:var(--ink-faint);
+    opacity:0; transform:rotate(-3deg) translateY(14px);
+    animation:cardIn .7s ease .1s forwards;
+  }
+  @keyframes cardIn{ to{ opacity:1; transform:rotate(-3deg) translateY(0);} }
+  .stamp-card .row{ display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px dashed var(--border-soft); }
+  .stamp-card .row:last-child{ border-bottom:none; }
+  .stamp-card .dot{ width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:7px; }
+  .stamp-card .head{ font-size:10.5px; letter-spacing:.12em; color:var(--ink-faint); text-transform:uppercase; margin-bottom:10px; }
+
+  @media (max-width:920px){ .stamp-stage{ height:280px; } .stamp{ width:210px; } .stamp-card{ width:230px; } }
+  @media (max-width:600px){ .stamp-stage{ display:none; } }
+
+  /* ---------- SECTIONS ---------- */
+  section{ position:relative; z-index:1; padding:96px 0; }
+  .section-head{ max-width:640px; margin-bottom:56px; }
+  .section-head h2{ font-size:clamp(1.9rem,3vw,2.6rem); font-weight:500; }
+  .section-head p{ color:var(--ink-dim); margin-top:16px; font-size:16px; }
+  .divider{ border:none; border-top:1px solid var(--border-soft); margin:0; }
+
+  .reveal{ opacity:0; transform:translateY(22px); transition:opacity .7s ease, transform .7s ease; }
+  .reveal.in{ opacity:1; transform:none; }
+
+  /* source cards */
+  .sources-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:22px; }
+  @media (max-width:1100px){ .sources-grid{ grid-template-columns:repeat(3,1fr); } }
+  @media (max-width:900px){ .sources-grid{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:600px){ .sources-grid{ grid-template-columns:1fr; } }
+
+  .idx-card{
+    background:var(--card); border:1px solid var(--border);
+    border-radius:6px; padding:22px 20px 20px;
+    position:relative;
+    box-shadow:0 18px 34px -22px rgba(0,0,0,.7);
+  }
+  .idx-card:nth-child(odd){ transform:rotate(-0.6deg); }
+  .idx-card:nth-child(even){ transform:rotate(0.6deg); }
+  .idx-card .tape{
+    position:absolute; top:-10px; left:26px; width:64px; height:22px;
+    background:linear-gradient(100deg, rgba(56,196,242,.35), rgba(56,196,242,.18));
+    border:1px solid rgba(56,196,242,.3);
+    transform:rotate(-4deg);
+  }
+  .idx-card .src-label{ display:flex; align-items:center; gap:9px; font-family:var(--mono); font-weight:600; font-size:13.5px; letter-spacing:.03em; margin-bottom:10px; }
+  .idx-card .dot{ width:9px; height:9px; border-radius:50%; flex:none; }
+  .idx-card p{ margin:0; color:var(--ink-dim); font-size:14.5px; }
+  .idx-card.optional{ border-style:dashed; }
+  .idx-card .badge{ position:absolute; top:16px; right:16px; font-family:var(--mono); font-size:10px; letter-spacing:.1em; color:var(--amber); border:1px solid var(--amber); padding:2px 7px; border-radius:20px; }
+
+  /* rules row */
+  .rules{ display:grid; grid-template-columns:repeat(3,1fr); gap:22px; margin-top:22px; }
+  @media (max-width:760px){ .rules{ grid-template-columns:1fr; } }
+  .rule{ font-family:var(--mono); padding:16px 18px; border-left:2px solid var(--border); }
+  .rule.active{ border-left-color:var(--cyan); }
+  .rule .name{ font-size:13.5px; font-weight:600; color:var(--ink); margin-bottom:6px; }
+  .rule .desc{ font-size:12.5px; color:var(--ink-faint); line-height:1.6; }
+
+  /* anomalies */
+  .anom-layout{ display:grid; grid-template-columns:1fr 1fr; gap:60px; align-items:center; }
+  @media (max-width:900px){ .anom-layout{ grid-template-columns:1fr; gap:40px; } }
+  .anom-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:16px; }
+  .anom-list li{ display:flex; gap:14px; align-items:flex-start; font-size:14.5px; color:var(--ink-dim); }
+  .flag{ flex:none; width:20px; height:20px; border-radius:5px; display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:11px; font-weight:700; margin-top:2px; }
+  .flag.r{ background:rgba(250,82,92,.16); color:var(--red); border:1px solid rgba(250,82,92,.4); }
+  .flag.a{ background:rgba(242,184,64,.16); color:var(--amber); border:1px solid rgba(242,184,64,.4); }
+  .flag.g{ background:rgba(140,242,158,.16); color:var(--green); border:1px solid rgba(140,242,158,.4); }
+
+  .confidence-strip{ background:var(--card); border:1px solid var(--border); border-radius:10px; padding:36px 28px 44px; }
+  .confidence-strip svg{ width:100%; height:auto; display:block; }
+  .strip-legend{ display:flex; gap:20px; margin-top:20px; flex-wrap:wrap; font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); }
+  .strip-legend span{ display:inline-flex; align-items:center; gap:7px; }
+  .strip-legend i{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+
+  /* filmstrip */
+  .filmstrip{ display:grid; grid-template-columns:repeat(2,1fr); gap:26px; }
+  @media (max-width:820px){ .filmstrip{ grid-template-columns:1fr; } }
+  .frame{
+    background:var(--card); border:1px solid var(--border); border-radius:2px;
+    position:relative; padding:22px 26px 26px;
+    transition:transform .25s ease, border-color .25s ease;
+  }
+  .frame:hover{ transform:translateY(-4px); border-color:rgba(56,196,242,.4); }
+  .sprockets{ position:absolute; left:0; right:0; height:14px; background-image:radial-gradient(circle at 50% 50%, var(--bg) 0 3.2px, transparent 3.3px); background-size:24px 14px; background-repeat:repeat-x; opacity:.9; }
+  .sprockets.top{ top:0; }
+  .sprockets.bottom{ bottom:0; }
+  .frame-body{ margin:16px 4px 8px; }
+  .frame .num{ font-family:var(--mono); font-size:11px; color:var(--ink-faint); letter-spacing:.1em; }
+  .frame h3{ font-size:20px; margin:8px 0 10px; font-weight:600; }
+  .frame p{ color:var(--ink-dim); font-size:14px; margin:0 0 12px; }
+  .frame .kbdrow{ display:flex; gap:6px; flex-wrap:wrap; }
+  kbd{ font-family:var(--mono); font-size:11px; background:var(--bg-2); border:1px solid var(--border); border-radius:4px; padding:2px 6px; color:var(--ink-dim); }
+
+  /* screenshot */
+  .screenshot-wrap{ margin-top:64px; display:flex; justify-content:center; }
+  .polaroid{
+    background:#0a1927; padding:14px 14px 46px; border-radius:6px;
+    border:1px solid var(--border); box-shadow:0 40px 80px -30px rgba(0,0,0,.8);
+    transform:rotate(-1.1deg); max-width:900px; width:100%; position:relative;
+  }
+  .polaroid img{ width:100%; display:block; border-radius:2px; }
+  .polaroid .cap{ position:absolute; bottom:14px; left:18px; font-family:var(--mono); font-size:12px; color:var(--ink-faint); }
+  .polaroid .corner{ position:absolute; width:34px; height:34px; background:linear-gradient(135deg, rgba(56,196,242,.4), rgba(56,196,242,.1)); }
+  .polaroid .corner.tl{ top:-6px; left:24px; transform:rotate(45deg); }
+  .polaroid .corner.br{ bottom:22px; right:24px; transform:rotate(45deg); }
+
+  /* safety */
+  .guarantees{ display:grid; grid-template-columns:repeat(4,1fr); gap:20px; }
+  @media (max-width:900px){ .guarantees{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:560px){ .guarantees{ grid-template-columns:1fr; } }
+  .guarantee{ padding:22px 18px; border:1px solid var(--border); border-radius:8px; background:var(--bg-2); }
+  .guarantee .chk{ color:var(--green); font-family:var(--mono); font-size:18px; margin-bottom:10px; display:block; }
+  .guarantee h4{ font-family:var(--sans); font-size:14.5px; font-weight:600; margin:0 0 6px; }
+  .guarantee p{ font-size:13px; color:var(--ink-faint); margin:0; line-height:1.55; }
+
+  /* download */
+  .os-tabs{ display:flex; gap:10px; margin-bottom:28px; flex-wrap:wrap; }
+  .os-tab{
+    font-family:var(--mono); font-size:13px; font-weight:600; padding:10px 18px;
+    border-radius:7px 7px 0 0; border:1px solid var(--border); border-bottom:none;
+    background:var(--bg-2); color:var(--ink-faint); cursor:pointer;
+  }
+  .os-tab[aria-selected="true"]{ background:var(--card); color:var(--cyan); border-color:var(--cyan); }
+  .os-panel{ display:none; border:1px solid var(--border); border-radius:0 8px 8px 8px; background:var(--card); padding:28px; }
+  .os-panel.active{ display:block; }
+  .dl-list{ display:flex; flex-direction:column; gap:10px; }
+  .dl-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; border:1px solid var(--border); border-radius:7px;
+    text-decoration:none; color:var(--ink); transition:border-color .15s, background .15s;
+  }
+  .dl-row:hover{ border-color:var(--cyan); background:rgba(56,196,242,.05); }
+  .dl-row .name{ font-family:var(--mono); font-size:13.5px; }
+  .dl-row .size{ font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); }
+  .dl-row.primary{ border-color:var(--cyan); background:rgba(56,196,242,.08); }
+  .dl-row.primary .name{ color:var(--cyan); font-weight:600; }
+  .all-releases{ margin-top:18px; font-family:var(--mono); font-size:12.5px; color:var(--ink-faint); }
+  .all-releases a{ color:var(--cyan); text-decoration:none; }
+
+  .cli-block{ margin-top:56px; }
+  .terminal{
+    background:#040d16; border:1px solid var(--border); border-radius:9px; overflow:hidden;
+    box-shadow:0 30px 60px -30px rgba(0,0,0,.8);
+  }
+  .terminal .bar{ display:flex; gap:7px; padding:12px 14px; border-bottom:1px solid var(--border-soft); }
+  .terminal .dotb{ width:10px; height:10px; border-radius:50%; }
+  .terminal pre{ margin:0; padding:20px 22px 24px; font-family:var(--mono); font-size:13.5px; line-height:1.9; overflow-x:auto; color:#cfeaf5; }
+  .terminal .c{ color:#5c7488; }
+  .terminal .p{ color:var(--cyan); }
+
+  /* footer */
+  footer{
+    border-top:1px solid var(--border-soft);
+    padding:2rem;
+    text-align:center;
+    color:var(--ink-faint);
+    font-family:var(--mono);
+    font-size:0.85rem;
+    position:relative; z-index:1;
+  }
+  footer a{ color:var(--cyan); text-decoration:none; }
+  footer a:hover{ text-decoration:underline; }
+  .footer-inner{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; max-width:1100px; margin:0 auto; }
+</style>
+</head>
+<body>
+
+<div class="grain"></div>
+<div class="glow"></div>
+
+<header>
+  <nav class="wrap">
+    <a href="#top" class="brand"><span class="mark"><i></i><i></i><i></i></span>eonsort</a>
+    <div class="navlinks-mobile-hide">
+      <a href="#sources">Sources</a>
+      <a href="#preview">Preview</a>
+      <a href="#also">More</a>
+      <a href="#see">Views</a>
+      <a href="#safety">Safety</a>
+      <a href="#download" class="cta">Download</a>
+    </div>
+  </nav>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="drift-field" id="driftField"></div>
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Sorting by date · v1.5.0</p>
+        <h1>The date on the file<br>is not always <em>the date<br>it was made.</em></h1>
+        <p class="lede">eonsort reads <strong>every independent source</strong> for when a file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based tree. You see the whole result before a byte is copied. <strong>Scanning and copying only ever read your sources.</strong></p>
+        <div class="cta-row">
+          <a class="btn btn-primary" id="primaryDownload" href="#download">↓ Download for your platform</a>
+          <a class="btn btn-ghost" href="https://github.com/it-atelier-gn/eonsort" target="_blank" rel="noopener">View source ↗</a>
+        </div>
+        <p class="fineprint">Windows, macOS and Linux. Desktop application and the <code>eonsort</code> command line tool. MIT licensed.</p>
+      </div>
+      <div class="stamp-stage">
+        <div class="stamp-card">
+          <div class="head">plan.jsonl · entry 0417</div>
+          <div class="row"><span><i class="dot" style="background:var(--c-filename)"></i>File name</span><span>2019‑05‑14</span></div>
+          <div class="row"><span><i class="dot" style="background:var(--c-exif)"></i>EXIF</span><span>2019‑05‑14</span></div>
+          <div class="row"><span><i class="dot" style="background:var(--c-filesystem)"></i>File system</span><span>2003‑01‑01</span></div>
+        </div>
+        <div class="stamp stamp-reject">
+          <div class="tag">SOURCE: FILE SYSTEM</div>
+          <div class="verdict">REJECTED</div>
+          <div class="ts">2003-01-01 00:00:00</div>
+          <div class="why">factory reset clock; every file after it carries the same date</div>
+        </div>
+        <div class="stamp stamp-confirm">
+          <div class="tag">CHOSEN DATE</div>
+          <div class="verdict">CONFIRMED</div>
+          <div class="ts">2019-05-14 09:22:03</div>
+          <div class="why">file name and EXIF agree</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- SOURCES -->
+  <section id="sources">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Where the date comes from</p>
+        <h2>Every source, cross-checked.</h2>
+        <p>Every source that reports a date is kept, and each one can be switched off. When they disagree, one of three rules decides which date is used.</p>
+      </div>
+
+      <div class="sources-grid">
+        <div class="idx-card reveal">
+          <div class="tape"></div>
+          <div class="src-label"><i class="dot" style="background:var(--c-filename)"></i>File name</div>
+          <p><code>IMG_20230506_101112.jpg</code>, <code>Screenshot 2021-07-04</code>, <code>Rechnung 06.05.2021</code>, and many further shapes.</p>
+        </div>
+        <div class="idx-card reveal">
+          <div class="tape"></div>
+          <div class="src-label"><i class="dot" style="background:var(--c-exif)"></i>EXIF</div>
+          <p><code>DateTimeOriginal</code> and related tags, in JPEG, TIFF, PNG, WebP, HEIF and common raw formats.</p>
+        </div>
+        <div class="idx-card reveal">
+          <div class="tape"></div>
+          <div class="src-label"><i class="dot" style="background:var(--c-media)"></i>Media</div>
+          <p>The recording time in the <code>mvhd</code> box of MP4, MOV, M4A and related containers.</p>
+        </div>
+        <div class="idx-card reveal">
+          <div class="tape"></div>
+          <div class="src-label"><i class="dot" style="background:var(--c-media)"></i>XMP sidecar</div>
+          <p>The date a raw developer settled on, in <code>IMG_1234.xmp</code> or <code>IMG_1234.CR2.xmp</code>. Trusted above the camera's own tag.</p>
+        </div>
+        <div class="idx-card reveal">
+          <div class="tape"></div>
+          <div class="src-label"><i class="dot" style="background:var(--c-vision)"></i>Google Takeout</div>
+          <p>The <code>photoTakenTime</code> a Takeout export parks in a JSON sidecar after stripping it out of the file.</p>
+        </div>
+        <div class="idx-card reveal">
+          <div class="tape"></div>
+          <div class="src-label"><i class="dot" style="background:var(--c-filesystem)"></i>File system</div>
+          <p>Whichever of created or modified is older, the field most backup tools overwrite.</p>
+        </div>
+      </div>
+
+      <div class="sources-grid" style="margin-top:22px;">
+        <div class="idx-card optional reveal">
+          <div class="badge">Last resort</div>
+          <div class="tape"></div>
+          <div class="src-label"><i class="dot" style="background:var(--c-filename)"></i>System properties</div>
+          <p>What the desktop itself knows: the Details tab on Windows, Spotlight on macOS. Asked only for files no other source could date, it reaches vendor raw files, ASF and WMV through whatever handler is installed.</p>
+        </div>
+      </div>
+
+      <div class="rules reveal">
+        <div class="rule active">
+          <div class="name">Weigh the evidence <span class="mono" style="color:var(--ink-faint); font-weight:400;">(default)</span></div>
+          <div class="desc">Discards impossible dates, then prefers the one two sources agree on.</div>
+        </div>
+        <div class="rule">
+          <div class="name">Oldest date wins</div>
+          <div class="desc">Keeps the earliest date any source reports.</div>
+        </div>
+        <div class="rule">
+          <div class="name">First match wins</div>
+          <div class="desc">Walks the sources in order and stops at the first hit.</div>
+        </div>
+      </div>
+
+      <p class="reveal" style="margin-top:18px; color:var(--ink-faint);">The setup panel lists every source, one to a line: drag them into the order <em>first match wins</em> walks, and untick the ones you never want asked. How much each source counts when the evidence is weighed is set on the command line.</p>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- ANOMALIES -->
+  <section id="anomalies">
+    <div class="wrap anom-layout">
+      <div class="reveal">
+        <p class="eyebrow">Anomalies</p>
+        <h2 style="margin-bottom:20px;">When the clock was wrong.</h2>
+        <p style="color:var(--ink-dim); margin-bottom:26px;">A camera whose battery has died resets its clock to a factory default, usually 1 January of 2000, 2003 or 2015, and every photo taken after that carries a date that looks entirely plausible. eonsort flags these rather than misfiling them silently:</p>
+        <ul class="anom-list">
+          <li><span class="flag r">✕</span>A date on a factory‑reset instant, in the future, or later than the file was written.</li>
+          <li><span class="flag r">✕</span>A run of files counting up from a reset date while the files themselves were written years later.</li>
+          <li><span class="flag a">!</span>A batch of files sharing one timestamp to the second.</li>
+          <li><span class="flag a">!</span>A file stranded years from everything else in its folder, or out of step with its camera’s counter.</li>
+          <li><span class="flag a">?</span>A whole number of hours between two sources, which is the shape of a time zone rather than a wrong date, and is reported as such.</li>
+          <li><span class="flag g">→</span>A whole run reading the same amount away from another source, gathered together with one button that corrects all of it.</li>
+        </ul>
+      </div>
+      <div class="confidence-strip reveal">
+        <svg viewBox="0 0 480 170" fill="none">
+          <line x1="20" y1="130" x2="460" y2="130" stroke="#173049" stroke-width="2"/>
+          <circle cx="55" cy="130" r="6" fill="#38c4f2"/>
+          <circle cx="105" cy="130" r="6" fill="#38c4f2"/>
+          <circle cx="150" cy="130" r="5" fill="#f2b840"/>
+          <circle cx="195" cy="130" r="6" fill="#38c4f2"/>
+          <circle cx="240" cy="130" r="6" fill="#38c4f2"/>
+          <circle cx="290" cy="130" r="5" fill="#f2b840"/>
+          <circle cx="335" cy="130" r="6" fill="#38c4f2"/>
+          <circle cx="380" cy="130" r="6" fill="#38c4f2"/>
+          <circle cx="420" cy="130" r="6" fill="#38c4f2"/>
+          <line x1="260" y1="128" x2="262" y2="58" stroke="#fa525c" stroke-width="1.5" stroke-dasharray="3 3"/>
+          <circle cx="262" cy="52" r="7" fill="#fa525c"/>
+          <text x="262" y="34" fill="#fa525c" font-family="IBM Plex Mono, monospace" font-size="11" text-anchor="middle">2003‑01‑01</text>
+          <text x="55" y="152" fill="#5c7488" font-family="IBM Plex Mono, monospace" font-size="10" text-anchor="middle">2018</text>
+          <text x="420" y="152" fill="#5c7488" font-family="IBM Plex Mono, monospace" font-size="10" text-anchor="middle">2024</text>
+        </svg>
+        <div class="strip-legend">
+          <span><i style="background:var(--cyan)"></i>sources agree</span>
+          <span><i style="background:var(--amber)"></i>single source</span>
+          <span><i style="background:var(--red)"></i>flagged</span>
+          <span><i style="background:var(--green)"></i>corrected by you</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- PREVIEW -->
+  <section id="preview">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Preview before copy</p>
+        <h2>Nothing is written until you press Copy files.</h2>
+        <p>A scan only reads. What it produces is the complete destination tree, laid out exactly as the copy would create it, so the plan can be reviewed and corrected first.</p>
+      </div>
+
+      <div class="rules reveal">
+        <div class="rule active">
+          <div class="name">The whole tree, in advance</div>
+          <div class="desc">Every destination folder with its file count and size. Columns can be resized and reordered, and clicking a folder shows everything beneath it.</div>
+        </div>
+        <div class="rule">
+          <div class="name">Issues, before they are copied</div>
+          <div class="desc">Flagged dates are grouped under Issues. Take the date from another source, type one in, or anchor a single file and shift a whole selection by that offset.</div>
+        </div>
+        <div class="rule">
+          <div class="name">A closer look</div>
+          <div class="desc">Hold Ctrl and turn the wheel over the preview to zoom into a picture, then drag to pan it; the small buttons in the corner do the same, and the zoom clears with the next file.</div>
+        </div>
+        <div class="rule">
+          <div class="name">Corrections kept beside the plan</div>
+          <div class="desc">Overrides and rotations are stored next to the plan file. They survive reopening, they are what the copy uses, and each one can be undone.</div>
+        </div>
+      </div>
+
+      <div class="screenshot-wrap reveal">
+        <div class="polaroid">
+          <div class="corner tl"></div>
+          <img src="demo.gif" alt="The eonsort desktop app scanning a folder of photographs: the planned tree fills in, a picture opens beside the date each source reports for it, then the charts and the timeline" loading="lazy" />
+          <div class="corner br"></div>
+          <div class="cap">fig. 1 · choose the folders, scan, review the plan, then copy.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- ALSO -->
+  <section id="also">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Along the way</p>
+        <h2>Four things a date alone will not fix.</h2>
+      </div>
+
+      <div class="rules reveal">
+        <div class="rule active">
+          <div class="name">Files that belong together</div>
+          <div class="desc">A live photo is a picture and a video whose dates rarely agree, and sorting them apart puts one memory in two folders. Groups are dated together, RAW beside JPEG and sidecars included.</div>
+        </div>
+        <div class="rule">
+          <div class="name">Copies of the same picture</div>
+          <div class="desc">Files holding the same bytes are grouped by content, heaviest first, with what the repetition costs. One button sends all but one of each to the recycle bin, after asking. Bursts of near-identical frames sit apart in a group of their own — different pictures, never removed.</div>
+        </div>
+        <div class="rule">
+          <div class="name">The date written onto the copy</div>
+          <div class="desc">A copy can carry the date eonsort settled on in its own EXIF block, corrections included, so the next tool to read it does not lose the work. Sources stay untouched.</div>
+        </div>
+        <div class="rule">
+          <div class="name">Work that stops at the folder tree</div>
+          <div class="desc">A small file beside each copy holds the date, the GPS reading, the place, the tags and the names. immich, PhotoPrism, digiKam and Lightroom read these. RAW, HEIC and video get one too.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- SHAPE -->
+  <section id="shape">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">The tree you want</p>
+        <h2>A folder pattern, and a name to go with it.</h2>
+      </div>
+
+      <div class="rules reveal">
+        <div class="rule active">
+          <div class="name">Patterns that ask questions</div>
+          <div class="desc">A pattern is a date layout with fields mixed in: the city a photograph was taken in, the camera that took it, the name it arrived with. Several fields in a row, and the first one the file can answer wins.</div>
+        </div>
+        <div class="rule">
+          <div class="name">Places, worked out here</div>
+          <div class="desc">The city, region and country come from the picture's own GPS reading, matched against a list of places kept on this machine. One button fetches the list, about 11 MB. Nothing leaves the computer.</div>
+        </div>
+        <div class="rule">
+          <div class="name">RAW read all the way through</div>
+          <div class="desc">A RAW file is read through the preview the camera stores inside it, so it is deduplicated, turned upright, scored and searched for faces like any other picture.</div>
+        </div>
+        <div class="rule">
+          <div class="name">A folder that watches itself</div>
+          <div class="desc">Point eonsort at a folder things arrive in and leave it running. Each new file is left alone until it stops growing, then sorted into the same tree as everything else.</div>
+        </div>
+        <div class="rule">
+          <div class="name">A copy that can be taken back</div>
+          <div class="desc">Undo removes what the copy wrote and nothing else. A file that was already there, or edited since it landed, stays where it stands, and only the folders the copy made are cleared away. Sources are never touched.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- VIEWS -->
+  <section id="see">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Views</p>
+        <h2>The same plan, from every angle.</h2>
+        <p>Each view scopes to whatever was selected, so the folder tree, Timeline, Gallery and Rings show only those files. In the walkable one: click to take the mouse, <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, <kbd>Esc</kbd> to release it.</p>
+      </div>
+
+      <div class="filmstrip">
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">01 / TIMELINE</div>
+            <h3>The plan in three dimensions</h3>
+            <p>One point per date each source reported, coloured by confidence. Three layouts morph into one another: a disagreement field, a time helix, and a memory terrain. Detail follows distance, from muted dots at range to the photographs themselves up close.</p>
+            <div class="kbdrow"><kbd>click to fly</kbd><kbd>auto‑fly</kbd></div>
+          </div>
+          <div class="sprockets bottom"></div>
+        </div>
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">02 / GALLERY</div>
+            <h3>Rooms built from the archive</h3>
+            <p>A building laid out afresh for every collection: one room per period, sized by what it holds, with short corridors between. Daylight falls through the clerestory. Pictures hang at eye height and videos play in frame.</p>
+            <div class="kbdrow"><kbd>W A S D</kbd><kbd>E</kbd> open</div>
+          </div>
+          <div class="sprockets bottom"></div>
+        </div>
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">03 / RINGS</div>
+            <h3>A ring for every year</h3>
+            <p>One circle per year, newest on top, each widening with the files that landed in it and the pictures standing around the rim. Every month has its own colour, so the seasons line up from ring to ring. <strong>Spiral</strong> unwinds the stack into a single coil.</p>
+            <div class="kbdrow"><kbd>drag</kbd><kbd>wheel</kbd><kbd>click</kbd> open</div>
+          </div>
+          <div class="sprockets bottom"></div>
+        </div>
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">04 / CHARTS</div>
+            <h3>The same questions in two dimensions</h3>
+            <p>A square per month, year by year: click to go finer, drag for a range. Alongside it, time of day, which source supplied each date, how confident eonsort is, and where the bulk of the files lands. Any selection scopes the whole application.</p>
+            <div class="kbdrow"><kbd>click</kbd><kbd>drag range</kbd></div>
+          </div>
+          <div class="sprockets bottom"></div>
+        </div>
+        <div class="frame reveal">
+          <div class="sprockets top"></div>
+          <div class="frame-body">
+            <div class="num">05 / SEARCH</div>
+            <h3>Search by what is in the picture</h3>
+            <p>Pictures are tagged in the background once a scan finishes. Ask in ordinary words — <code>forest and dog</code> — and every view narrows to what matches. Or ask with a picture: <em>Pictures like this one</em> answers with photographs showing something similar, which are not copies of it. A second model marks how good each picture looks, out of ten. What is learned belongs to the picture, not the run, so it survives a rename, a move, or the copy into the sorted tree. Both models run locally.</p>
+            <div class="kbdrow"><kbd>Enter</kbd><kbd>Clear</kbd><kbd>tag filter</kbd><kbd>rated at least</kbd></div>
+          </div>
+          <div class="sprockets bottom"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- SAFETY -->
+  <section id="safety">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Guarantees</p>
+        <h2>Sorting never writes to your sources.</h2>
+      </div>
+      <div class="guarantees">
+        <div class="guarantee reveal">
+          <span class="chk">✓</span>
+          <h4>Nothing is overwritten</h4>
+          <p>Same‑name files are compared by content. Identical ones are left alone, different ones are stored beside them as <code>_dup_1</code>.</p>
+        </div>
+        <div class="guarantee reveal">
+          <span class="chk">✓</span>
+          <h4>Every copy is atomic</h4>
+          <p>Written to staging, flushed, then renamed into place.</p>
+        </div>
+        <div class="guarantee reveal">
+          <span class="chk">✓</span>
+          <h4>Everything resumes</h4>
+          <p>The scan appends to its plan and the copy keeps a journal. Stopping a run, or losing power, costs nothing.</p>
+        </div>
+        <div class="guarantee reveal">
+          <span class="chk">✓</span>
+          <h4>Sources stay untouched</h4>
+          <p>Scanning and copying never write, move, or delete an original. One thing in the whole program removes a source file: the <em>Remove extra identical copies</em> button, which asks first and sends them to the recycle bin, never past it. Bursts it never touches.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- DOWNLOAD -->
+  <section id="download">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Download · v1.5.0</p>
+        <h2>Pick your platform.</h2>
+        <p>Free and open source under the MIT license. Installers are below, or build it yourself from source.</p>
+      </div>
+
+      <div class="reveal">
+        <div class="os-tabs" role="tablist">
+          <button class="os-tab" role="tab" data-os="windows">Windows</button>
+          <button class="os-tab" role="tab" data-os="mac">macOS</button>
+          <button class="os-tab" role="tab" data-os="linux">Linux</button>
+        </div>
+
+        <div class="os-panel" id="panel-windows">
+          <div class="dl-list">
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/Eonsort_1.5.0_x64-setup.exe"><span class="name">Eonsort_1.5.0_x64-setup.exe</span><span class="size">recommended · NSIS installer</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/Eonsort_1.5.0_x64_en-US.msi"><span class="name">Eonsort_1.5.0_x64_en-US.msi</span><span class="size">MSI installer</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/eonsort-windows-x64-portable.zip"><span class="name">eonsort-windows-x64-portable.zip</span><span class="size">no install · app and CLI</span></a>
+          </div>
+        </div>
+        <div class="os-panel" id="panel-mac">
+          <div class="dl-list">
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/Eonsort_1.5.0_aarch64.dmg"><span class="name">Eonsort_1.5.0_aarch64.dmg</span><span class="size">recommended · Apple Silicon</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/Eonsort_1.5.0_x64.dmg"><span class="name">Eonsort_1.5.0_x64.dmg</span><span class="size">Intel</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/eonsort-macos-arm64-cli.tar.gz"><span class="name">eonsort-macos-arm64-cli.tar.gz</span><span class="size">command line · Apple Silicon</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/eonsort-macos-x64-cli.tar.gz"><span class="name">eonsort-macos-x64-cli.tar.gz</span><span class="size">command line · Intel</span></a>
+          </div>
+        </div>
+        <div class="os-panel" id="panel-linux">
+          <div class="dl-list">
+            <a class="dl-row primary" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/Eonsort_1.5.0_amd64.AppImage"><span class="name">Eonsort_1.5.0_amd64.AppImage</span><span class="size">recommended · runs anywhere</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/Eonsort_1.5.0_amd64.deb"><span class="name">Eonsort_1.5.0_amd64.deb</span><span class="size">Debian / Ubuntu</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/Eonsort-1.5.0-1.x86_64.rpm"><span class="name">Eonsort-1.5.0-1.x86_64.rpm</span><span class="size">Fedora / RHEL</span></a>
+            <a class="dl-row" href="https://github.com/it-atelier-gn/eonsort/releases/download/v1.5.0/eonsort-linux-x64-cli.tar.gz"><span class="name">eonsort-linux-x64-cli.tar.gz</span><span class="size">command line</span></a>
+          </div>
+        </div>
+        <p class="all-releases">Checksums and earlier versions are on the <a href="https://github.com/it-atelier-gn/eonsort/releases" target="_blank" rel="noopener">releases page ↗</a></p>
+      </div>
+
+      <div class="cli-block reveal">
+        <p class="eyebrow" style="margin-bottom:14px;">Or the command line</p>
+        <div class="terminal">
+          <div class="bar">
+            <span class="dotb" style="background:#fa525c"></span>
+            <span class="dotb" style="background:#f2b840"></span>
+            <span class="dotb" style="background:#38c4f2"></span>
+          </div>
+          <pre><span class="c"># scan, review, then copy, for scheduled jobs and very large archives</span>
+<span class="p">$</span> eonsort sort --source <span class="p">"D:\Photos"</span> --destination <span class="p">"E:\Sorted"</span>
+
+<span class="c"># or run the phases separately</span>
+<span class="p">$</span> eonsort scan --source <span class="p">"D:\Photos"</span> --plan photos.jsonl
+<span class="p">$</span> eonsort show --plan photos.jsonl --suspect
+<span class="p">$</span> eonsort copy --plan photos.jsonl --destination <span class="p">"E:\Sorted"</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="footer-inner">
+    <span>© 2026 Georg Nelles · MIT License</span>
+    <span>
+      <a href="https://github.com/it-atelier-gn/eonsort">GitHub</a> ·
+      <a href="https://github.com/it-atelier-gn/eonsort/releases">Releases</a> ·
+      <a href="https://github.com/it-atelier-gn/eonsort/issues">Issues</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+  // ambient drifting metadata fragments
+  (function(){
+    var frags = [
+      "IMG_20230506_101112.jpg", "DateTimeOriginal", "Rechnung_06.05.2021.pdf",
+      "Facture 14-03-2020.pdf", "Factura 22-11-2019.pdf", "mvhd · MP4",
+      "Fattura 03-09-2022.pdf", "Skärmbild 2021-07-04.png", "請求書_20210506.pdf",
+      "ctime", "发票_2021-05-06.pdf", "Счёт_06.05.2021.pdf",
+      "Screenshot 2021-07-04.png", "영수증_2021-05-06.jpg", "Nota fiscal 06-05-2021.pdf",
+      "ModifyDate", "Fatura_06.05.2021.pdf", "Τιμολόγιο 17-06-2018.pdf",
+      "فاتورة 06-05-2021.pdf", "Kvittering_06.05.2021.pdf",
+      "VID_20190514_092203.mp4", "Számla_2021.05.06.pdf", "Lasku_06.05.2021.pdf",
+      "Hóa-đơn 06-05-2021.pdf", "0x0132 EXIF", "birthtime",
+      "factory reset · 2000-01-01"
+    ];
+    var field = document.getElementById('driftField');
+    if(!field) return;
+    frags.forEach(function(t, i){
+      var el = document.createElement('span');
+      el.className = 'drift';
+      el.textContent = t;
+      el.style.left = (4 + (i * 8.3) % 92) + '%';
+      el.style.top = (100 - (i * 11) % 100) + '%';
+      el.style.animationDuration = (16 + (i % 5) * 4) + 's';
+      el.style.animationDelay = (-(i * 2.7)) + 's';
+      field.appendChild(el);
+    });
+  })();
+
+  // scroll reveal
+  (function(){
+    var els = document.querySelectorAll('.reveal');
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, { threshold:0.12, rootMargin:'0px 0px -40px 0px' });
+    els.forEach(function(el){ io.observe(el); });
+  })();
+
+  // OS detect + tabs
+  (function(){
+    var ua = navigator.userAgent;
+    var os = 'linux';
+    var label = 'Linux';
+    if(/Win/i.test(ua)){ os='windows'; label='Windows'; }
+    else if(/Mac/i.test(ua)){ os='mac'; label='macOS'; }
+
+    var tabs = document.querySelectorAll('.os-tab');
+    var panels = document.querySelectorAll('.os-panel');
+    function select(target){
+      tabs.forEach(function(t){ t.setAttribute('aria-selected', t.dataset.os === target ? 'true':'false'); });
+      panels.forEach(function(p){ p.classList.toggle('active', p.id === 'panel-' + target); });
+    }
+    tabs.forEach(function(t){ t.addEventListener('click', function(){ select(t.dataset.os); }); });
+    select(os);
+
+    var primary = document.getElementById('primaryDownload');
+    if(primary){ primary.textContent = '↓ Download for ' + label; }
+  })();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Eonsort",
+  "version": "0.0.0-dev",
+  "identifier": "de.georg-nelles.eonsort",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Eonsort",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "devtools": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob: asset: http://asset.localhost; media-src 'self' asset: http://asset.localhost; frame-src 'self' asset: http://asset.localhost; style-src 'self' 'unsafe-inline'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Utility",
+    "shortDescription": "Sort files into date-based folders",
+    "longDescription": "Reads creation dates from file names, EXIF metadata, embedded media metadata and the file system, then previews and copies files into a dated folder structure.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../crates/eonsort-core/models/yunet.safetensors": "models/yunet.safetensors",
+      "../crates/eonsort-core/models/yunet-LICENSE": "models/yunet-LICENSE",
+      "../crates/eonsort-core/models/sface.safetensors": "models/sface.safetensors",
+      "../crates/eonsort-core/models/sface-LICENSE": "models/sface-LICENSE"
+    }
+  }
+}

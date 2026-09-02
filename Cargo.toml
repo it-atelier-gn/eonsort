@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = ["crates/eonsort-core", "crates/eonsort-cli", "src-tauri"]
+
+[workspace.package]
+version = "0.0.0-dev"
+edition = "2021"
+license = "MIT"
+authors = ["Georg Nelles"]
+repository = "https://github.com/it-atelier-gn/eonsort"
+
+[workspace.dependencies]
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+eonsort-core = { path = "crates/eonsort-core" }
+anyhow = "1"
+base64 = "0.23"
+blake3 = "1"
+candle-core = "0.11"
+candle-nn = "0.11"
+candle-transformers = "0.11"
+chrono = { version = "0.4", features = ["serde"] }
+filetime = "0.2"
+heif-oxide = "0.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
+kamadak-exif = "0.6"
+rayon = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+turbojpeg = "1.5"
+ureq = { version = "3", default-features = false, features = ["json"] }
+walkdir = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

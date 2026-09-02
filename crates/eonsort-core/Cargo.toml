@@ -1,0 +1,53 @@
+[package]
+name = "eonsort-core"
+description = "Creation-date file sorting engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+download = ["ureq/rustls", "dep:zip"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
+upright = ["candle", "download"]
+tagging = ["candle", "download", "dep:tokenizers"]
+quality = ["candle", "download"]
+faces = ["candle", "download"]
+
+[dependencies]
+base64.workspace = true
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+candle-transformers = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
+blake3.workspace = true
+chrono.workspace = true
+filetime.workspace = true
+heif-oxide.workspace = true
+image.workspace = true
+kamadak-exif.workspace = true
+rayon.workspace = true
+regex.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+turbojpeg.workspace = true
+ureq.workspace = true
+walkdir.workspace = true
+zip = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+[dev-dependencies]
+tempfile.workspace = true
