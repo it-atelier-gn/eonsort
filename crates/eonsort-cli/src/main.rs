@@ -10,7 +10,6 @@ use eonsort_core::presets;
 use eonsort_core::providers::{clamp_weight, DetectOptions, Provider, Strategy, Weights};
 use eonsort_core::scan::{ScanOptions, ScanPhase, ScanProgress};
 use eonsort_core::suspect::{self, EntryFacts, Flag, Severity};
-use eonsort_core::undo::{self, UndoOptions};
 use eonsort_core::verify::{VerifyOptions, VerifyProgress, VerifyReport};
 use eonsort_core::watch;
 use eonsort_core::{default_plan_name, read_plan, retarget, scan, verify, Plan};
@@ -42,8 +41,6 @@ enum Command {
     Sort(SortArgs),
     /// Print the entries of a plan.
     Show(ShowArgs),
-    /// Remove the copies a plan made, leaving the sources alone.
-    Undo(UndoArgs),
     /// Report runs of files whose clock was out by the same amount.
     Offsets(OffsetsArgs),
     /// List the ready-made folder and name patterns.
@@ -79,18 +76,6 @@ struct PlacesArgs {
     /// Folder to keep the place names in. Pass the same one to --gazetteer when scanning.
     #[arg(long)]
     into: PathBuf,
-}
-
-#[derive(Args)]
-struct UndoArgs {
-    #[arg(short, long)]
-    plan: PathBuf,
-    /// Report what would be removed without removing anything.
-    #[arg(long)]
-    dry_run: bool,
-    /// Leave behind the folders the copy created, even once they are empty.
-    #[arg(long)]
-    keep_folders: bool,
 }
 
 #[derive(Args)]
@@ -293,14 +278,6 @@ fn main() -> Result<()> {
             )?;
         }
         Command::Show(args) => show(&args)?,
-        Command::Undo(args) => {
-            let options = UndoOptions {
-                dry_run: args.dry_run,
-                prune_folders: !args.keep_folders,
-            };
-            let report = undo::execute(&args.plan, &options, &cancel)?;
-            print_undo_report(&report, args.dry_run);
-        }
         Command::Offsets(args) => show_offsets(&args)?,
         Command::Places(args) => get_places(&args, &cancel)?,
         Command::Watch(args) => run_watch(&args, &cancel)?,
@@ -398,30 +375,6 @@ fn get_places(args: &PlacesArgs, cancel: &AtomicBool) -> Result<()> {
     );
     println!("{}", geocode::CREDIT);
     Ok(())
-}
-
-fn print_undo_report(report: &undo::UndoReport, dry_run: bool) {
-    let verb = if dry_run {
-        "would be removed"
-    } else {
-        "removed"
-    };
-    println!("{} {verb}, {}", report.removed, human_bytes(report.bytes));
-    if report.left_alone > 0 {
-        println!("{} left alone: they were already there", report.left_alone);
-    }
-    if report.changed > 0 {
-        println!("{} left alone: changed since the copy", report.changed);
-    }
-    if report.missing > 0 {
-        println!("{} already gone", report.missing);
-    }
-    if report.folders > 0 {
-        println!("{} empty folders cleared away", report.folders);
-    }
-    for failure in &report.failures {
-        eprintln!("could not remove {failure}");
-    }
 }
 
 fn show_offsets(args: &OffsetsArgs) -> Result<()> {

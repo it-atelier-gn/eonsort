@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -48,7 +48,11 @@ pub fn exact(files: &[(PathBuf, u64)], cancel: &AtomicBool) -> Result<Vec<Duplic
 
 fn by_content(size: u64, sources: &[&PathBuf]) -> Vec<DuplicateGroup> {
     let mut by_hash: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
     for source in sources {
+        if !seen.insert(same_file(source)) {
+            continue;
+        }
         let Some(digest) = hash(source) else { continue };
         by_hash.entry(digest).or_default().push((*source).clone());
     }
@@ -69,6 +73,54 @@ fn by_content(size: u64, sources: &[&PathBuf]) -> Vec<DuplicateGroup> {
 
 fn hash(path: &Path) -> Option<String> {
     crate::tags::digest(path)
+}
+
+pub fn same_file(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    Removable,
+    Vanished,
+    Changed,
+    TheKeeperItself,
+}
+
+impl Verdict {
+    pub fn describe(&self) -> &'static str {
+        match self {
+            Verdict::Removable => "an identical copy is still there",
+            Verdict::Vanished => "it is no longer on disk",
+            Verdict::Changed => "it no longer holds the same bytes as the copy that is kept",
+            Verdict::TheKeeperItself => "it is the copy that is kept, reached by another path",
+        }
+    }
+}
+
+pub fn look_again(keeper: &Path, extra: &Path) -> Verdict {
+    if same_file(keeper) == same_file(extra) {
+        return Verdict::TheKeeperItself;
+    }
+
+    let (Ok(kept), Ok(going)) = (keeper.metadata(), extra.metadata()) else {
+        return Verdict::Vanished;
+    };
+    if !kept.is_file() || !going.is_file() {
+        return Verdict::Vanished;
+    }
+    if kept.len() != going.len() {
+        return Verdict::Changed;
+    }
+
+    let (Some(one), Some(two)) = (hash(keeper), hash(extra)) else {
+        return Verdict::Vanished;
+    };
+    if one == two {
+        Verdict::Removable
+    } else {
+        Verdict::Changed
+    }
 }
 
 pub fn wasted(groups: &[DuplicateGroup]) -> u64 {
@@ -158,6 +210,102 @@ mod tests {
 
         let cancel = AtomicBool::new(true);
         assert!(matches!(exact(&listed, &cancel), Err(Error::Cancelled)));
+    }
+
+    #[test]
+    fn one_file_listed_twice_is_not_a_copy_of_itself() {
+        let dir = tempdir().unwrap();
+        let listed = files(dir.path(), &[("a.jpg", b"same picture")]);
+        let twice = vec![listed[0].clone(), listed[0].clone()];
+
+        assert!(exact(&twice, &AtomicBool::new(false)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn one_path_reached_two_ways_is_not_a_copy_of_itself() {
+        let dir = tempdir().unwrap();
+        let deep = dir.path().join("2023");
+        fs::create_dir_all(&deep).unwrap();
+        let listed = files(&deep, &[("a.jpg", b"same picture")]);
+        let roundabout = dir.path().join(".").join("2023").join("a.jpg");
+        let twice = vec![listed[0].clone(), (roundabout, 12)];
+
+        assert!(exact(&twice, &AtomicBool::new(false)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_real_copy_beside_a_path_listed_twice_still_reports_one_extra() {
+        let dir = tempdir().unwrap();
+        let listed = files(
+            dir.path(),
+            &[("a.jpg", b"same picture"), ("b.jpg", b"same picture")],
+        );
+        let listing = vec![listed[0].clone(), listed[0].clone(), listed[1].clone()];
+
+        let groups = exact(&listing, &AtomicBool::new(false)).unwrap();
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].sources.len(), 2);
+        assert_eq!(groups[0].wasted, 12);
+    }
+
+    #[test]
+    fn a_copy_still_holding_the_same_bytes_may_go() {
+        let dir = tempdir().unwrap();
+        let listed = files(
+            dir.path(),
+            &[("a.jpg", b"same picture"), ("b.jpg", b"same picture")],
+        );
+
+        assert_eq!(look_again(&listed[0].0, &listed[1].0), Verdict::Removable);
+    }
+
+    #[test]
+    fn a_copy_rewritten_since_the_search_stays() {
+        let dir = tempdir().unwrap();
+        let listed = files(
+            dir.path(),
+            &[("a.jpg", b"same picture"), ("b.jpg", b"same picture")],
+        );
+        fs::write(&listed[1].0, b"different!!!").unwrap();
+
+        assert_eq!(look_again(&listed[0].0, &listed[1].0), Verdict::Changed);
+    }
+
+    #[test]
+    fn a_copy_of_another_length_stays_without_reading_it() {
+        let dir = tempdir().unwrap();
+        let listed = files(
+            dir.path(),
+            &[("a.jpg", b"same picture"), ("b.jpg", b"same picture")],
+        );
+        fs::write(&listed[1].0, b"longer than it was").unwrap();
+
+        assert_eq!(look_again(&listed[0].0, &listed[1].0), Verdict::Changed);
+    }
+
+    #[test]
+    fn a_keeper_that_went_away_takes_the_whole_group_with_it() {
+        let dir = tempdir().unwrap();
+        let listed = files(
+            dir.path(),
+            &[("a.jpg", b"same picture"), ("b.jpg", b"same picture")],
+        );
+        fs::remove_file(&listed[0].0).unwrap();
+
+        assert_eq!(look_again(&listed[0].0, &listed[1].0), Verdict::Vanished);
+    }
+
+    #[test]
+    fn the_keeper_reached_by_another_path_is_never_removable() {
+        let dir = tempdir().unwrap();
+        let listed = files(dir.path(), &[("a.jpg", b"same picture")]);
+        let roundabout = dir.path().join(".").join("a.jpg");
+
+        assert_eq!(
+            look_again(&listed[0].0, &roundabout),
+            Verdict::TheKeeperItself
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@
     onShift: (sources: string[], seconds: number) => void;
     onReprovider: (sources: string[], provider: Provider) => void;
     onRotate: (sources: string[], quarterTurns: number) => void;
+    onLeaveOut: () => void;
     onClear: () => void;
     offsets?: OffsetView[];
   }
@@ -19,6 +20,7 @@
     onShift,
     onReprovider,
     onRotate,
+    onLeaveOut,
     onClear,
     offsets = [],
   }: Props = $props();
@@ -58,6 +60,7 @@
 <div class="panel">
   <div class="head">
     <strong>{entries.length} selected</strong>
+    <button class="ghost" disabled={busy} onclick={onLeaveOut}>Leave out</button>
     <button class="ghost" onclick={onClear}>Clear</button>
   </div>
 

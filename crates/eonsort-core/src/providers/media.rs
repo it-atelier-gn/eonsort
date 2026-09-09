@@ -283,7 +283,7 @@ mod tests {
         let mut moov = boxed(b"mvhd", &mvhd);
         moov.extend_from_slice(&boxed(b"meta", &meta));
 
-        let mut out = boxed(b"ftyp", b"qt      ");
+        let mut out = boxed(b"ftyp", b"qt  \0\0\0\0");
         out.extend_from_slice(&boxed(b"moov", &moov));
         out
     }

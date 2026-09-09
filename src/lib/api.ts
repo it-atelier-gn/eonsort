@@ -19,6 +19,7 @@ export interface Settings {
   sources: string[];
   destination: string | null;
   folder_pattern: string;
+  name_pattern: string;
   providers: Provider[];
   strategy: Strategy;
   weights: Weights;
@@ -40,6 +41,7 @@ export interface ScanRequest {
   sources: string[];
   destination: string | null;
   folder_pattern: string;
+  name_pattern: string;
   providers: Provider[];
   strategy: Strategy;
   weights: Weights;
@@ -54,7 +56,9 @@ export interface PlanSummary {
   sources: string[];
   destination: string | null;
   folder_pattern: string;
+  name_pattern: string;
   files: number;
+  left_out: number;
   bytes: number;
   skipped: number;
   folders: number;
@@ -85,6 +89,7 @@ export interface FlagView {
 
 export interface DuplicateView {
   sources: string[];
+  keeper: string | null;
   folder: string;
   bytes: number;
   wasted: number;
@@ -254,11 +259,24 @@ export type Thumbnail =
   | { kind: "playable"; mime: string }
   | { kind: "none" };
 
+export interface Preset {
+  name: string;
+  folder: string;
+  file: string;
+  about: string;
+}
+
 export const getSettings = () => invoke<Settings>("get_settings");
 export const saveSettings = (settings: Settings) =>
   invoke<void>("save_settings", { settings });
 export const checkFolderPattern = (pattern: string) =>
   invoke<void>("check_folder_pattern", { pattern });
+export const checkNamePattern = (pattern: string) =>
+  invoke<void>("check_name_pattern", { pattern });
+export const listPresets = () => invoke<Preset[]>("list_presets");
+export const listLeftOut = () => invoke<string[]>("list_left_out");
+export const setExcluded = (sources: string[], excluded: boolean) =>
+  invoke<number>("set_excluded", { sources, excluded });
 export const cancelJob = () => invoke<void>("cancel_job");
 export const startScan = (request: ScanRequest) =>
   invoke<string>("start_scan", { request });

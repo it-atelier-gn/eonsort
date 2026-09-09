@@ -1,4 +1,4 @@
-import type { DuplicateReport } from "$lib/api";
+import type { DuplicateReport, DuplicateView } from "$lib/api";
 
 export const LIST_LIMIT = 200;
 
@@ -17,6 +17,14 @@ export function listed<T>(items: T[], limit: number = LIST_LIMIT): Listing<T> {
 export function removableCopies(report: DuplicateReport | null): number {
   if (!report) return 0;
   return Math.max(0, report.files - report.groups.length);
+}
+
+export function onAShare(path: string): boolean {
+  return path.startsWith("\\\\") || path.startsWith("//");
+}
+
+export function anyOnAShare(groups: DuplicateView[]): boolean {
+  return groups.some((group) => group.sources.some(onAShare));
 }
 
 export interface MemberSet {

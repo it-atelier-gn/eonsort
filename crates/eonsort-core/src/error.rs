@@ -2,6 +2,12 @@ use std::path::PathBuf;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[cfg(windows)]
+const UNWRITABLE_HINT: &str =
+    "Choose another folder, or allow eonsort under Windows ransomware protection.";
+#[cfg(not(windows))]
+const UNWRITABLE_HINT: &str = "Choose another folder, or grant write permission on this one.";
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{path}: {source}")]
@@ -43,6 +49,9 @@ pub enum Error {
 
     #[error("this plan has no destination folder yet")]
     NoDestination,
+
+    #[error("nothing can be written into {}. {}", path.display(), UNWRITABLE_HINT)]
+    DestinationNotWritable { path: PathBuf },
 
     #[error("cancelled")]
     Cancelled,

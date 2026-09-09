@@ -46,6 +46,7 @@
     busy: boolean;
     onOpen: (path: string) => void;
     onReveal: (path: string) => void;
+    onLeaveOut: (path: string) => void;
     onLike?: (path: string) => void;
     onChoose: (choice: DateChoice) => void;
     onRevert: () => void;
@@ -66,6 +67,7 @@
     busy,
     onOpen,
     onReveal,
+    onLeaveOut,
     onLike,
     onChoose,
     onRevert,
@@ -619,6 +621,14 @@
         {#if entry.outcome && entry.outcome !== "failed"}
           <button onclick={() => onOpen(entry.destination)}>Open copy</button>
         {/if}
+        <button
+          class="ghost"
+          disabled={busy}
+          onclick={() => onLeaveOut(entry.source)}
+          title="Drop this file from the plan, leaving it where it is"
+        >
+          Leave out
+        </button>
       </div>
 
       {#if onLike}

@@ -157,14 +157,18 @@ pub fn execute(
     let journal_file = journal_path(plan_path);
     let done = read_journal(&journal_file)?;
 
-    let staging = plan
+    let destination = plan
         .header
         .destination
         .as_ref()
-        .ok_or(Error::NoDestination)?
-        .join(STAGING_DIR);
+        .ok_or(Error::NoDestination)?;
+    let staging = destination.join(STAGING_DIR);
     let _ = fs::remove_dir_all(&staging);
-    fs::create_dir_all(&staging).map_err(|e| Error::io(&staging, e))?;
+    if fs::create_dir_all(&staging).is_err() {
+        return Err(Error::DestinationNotWritable {
+            path: destination.clone(),
+        });
+    }
 
     let pending: Vec<&PlanEntry> = plan
         .entries
@@ -834,6 +838,45 @@ mod tests {
     }
 
     #[test]
+    fn a_picture_turned_by_hand_lands_turned_and_marked_upright() {
+        let upright = crate::exif_write::jpeg_with_exif(64, 32, 1);
+        let fixture = Fixture::turning(&[("IMG_20030101_000012.jpg", &upright)]);
+        let source = fixture
+            .dir
+            .path()
+            .join("src")
+            .join("IMG_20030101_000012.jpg");
+
+        let mut turns = crate::overrides::Rotations::default();
+        turns.set(
+            source,
+            crate::overrides::RotationOverride {
+                transform: crate::rotate::Transform::Rotate90,
+                reencode: false,
+                at: chrono::NaiveDate::from_ymd_opt(2026, 9, 6)
+                    .unwrap()
+                    .and_hms_opt(22, 14, 38)
+                    .unwrap(),
+            },
+        );
+        crate::overrides::write_rotations(&crate::overrides::rotations_path(&fixture.plan), &turns)
+            .unwrap();
+
+        let report = fixture.run();
+
+        assert_eq!(report.progress.turned, 1);
+        assert_eq!(report.progress.not_turned, 0);
+
+        let landed = fixture.landed().pop().unwrap();
+        assert_eq!(crate::rotate::read_orientation(&landed), 1);
+
+        let bytes = fs::read(&landed).unwrap();
+        let decoded =
+            image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (32, 64));
+    }
+
+    #[test]
     fn copies_to_the_folder_the_user_corrected_the_date_to() {
         let fixture = Fixture::new(&[("IMG_20030101_000012.jpg", b"alpha")]);
         let source = fixture
@@ -871,6 +914,25 @@ mod tests {
             fs::read(fixture.out("2019/07/IMG_20030101_000012.jpg")).unwrap(),
             b"alpha"
         );
+    }
+
+    #[test]
+    fn a_destination_that_cannot_be_written_to_is_named_in_the_error() {
+        let fixture = Fixture::new(&[("IMG_20030101_000012.jpg", b"alpha")]);
+        let destination = fixture.dir.path().join("out");
+        fs::write(&destination, b"in the way").unwrap();
+
+        let refused = execute(
+            &fixture.plan,
+            &CopyOptions::default(),
+            &AtomicBool::new(false),
+            &|_| {},
+        );
+
+        match refused {
+            Err(Error::DestinationNotWritable { path }) => assert_eq!(path, destination),
+            other => panic!("expected an unwritable destination, got {other:?}"),
+        }
     }
 
     #[test]

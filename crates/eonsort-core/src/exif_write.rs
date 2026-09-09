@@ -20,11 +20,8 @@ const TAG_GPS_LONGITUDE_REF: u16 = 0x0003;
 const TAG_GPS_LONGITUDE: u16 = 0x0004;
 const TYPE_RATIONAL: u16 = 5;
 const SECONDS_SCALE: u32 = 10_000;
-#[cfg(test)]
 const TAG_PIXEL_X: u16 = 0xA002;
-#[cfg(test)]
 const TAG_PIXEL_Y: u16 = 0xA003;
-#[cfg(test)]
 const TYPE_LONG: u16 = 4;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -48,6 +45,39 @@ pub fn set_orientation(jpeg: &mut [u8], orientation: u16) -> bool {
         return false;
     }
     write_u16(tiff, entry + 8, order, orientation)
+}
+
+pub fn set_dimensions(jpeg: &mut [u8], width: u32, height: u32) -> bool {
+    let Some(range) = exif_range(jpeg) else {
+        return false;
+    };
+    let tiff = &mut jpeg[range];
+    let Some((order, ifd0)) = header(tiff) else {
+        return false;
+    };
+    let Some(sub) = find_entry(tiff, order, ifd0, TAG_EXIF_IFD)
+        .and_then(|entry| read_u32(tiff, entry + 8, order))
+        .map(|at| at as usize)
+    else {
+        return false;
+    };
+
+    let across = write_side(tiff, order, sub, TAG_PIXEL_X, width);
+    let down = write_side(tiff, order, sub, TAG_PIXEL_Y, height);
+    across && down
+}
+
+fn write_side(tiff: &mut [u8], order: Order, ifd: usize, tag: u16, value: u32) -> bool {
+    let Some(entry) = find_entry(tiff, order, ifd, tag) else {
+        return false;
+    };
+    match read_u16(tiff, entry + 2, order) {
+        Some(TYPE_SHORT) => {
+            u16::try_from(value).is_ok_and(|small| write_u16(tiff, entry + 8, order, small))
+        }
+        Some(TYPE_LONG) => write_u32(tiff, entry + 8, order, value),
+        _ => false,
+    }
 }
 
 pub fn set_taken(jpeg: &mut [u8], taken: NaiveDateTime) -> bool {
@@ -219,7 +249,22 @@ fn write_ascii(buf: &mut [u8], order: Order, ifd: usize, tag: u16, value: &[u8])
     true
 }
 
-fn exif_range(jpeg: &[u8]) -> Option<Range<usize>> {
+pub(crate) fn carry_over(source: &[u8], target: &mut Vec<u8>) -> bool {
+    let Some(segment) = app1_range(source) else {
+        return false;
+    };
+    if target.len() < 2 || target[0] != 0xFF || target[1] != 0xD8 {
+        return false;
+    }
+    if app1_range(target).is_some() {
+        return false;
+    }
+    let carried = source[segment].to_vec();
+    target.splice(2..2, carried);
+    true
+}
+
+fn app1_range(jpeg: &[u8]) -> Option<Range<usize>> {
     if jpeg.len() < 4 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 {
         return None;
     }
@@ -247,10 +292,15 @@ fn exif_range(jpeg: &[u8]) -> Option<Range<usize>> {
         }
         let payload = pos + 2..pos + length;
         if marker == 0xE1 && jpeg.get(payload.clone())?.starts_with(EXIF_PREFIX) {
-            return Some(payload.start + EXIF_PREFIX.len()..payload.end);
+            return Some(pos - 2..payload.end);
         }
         pos += length;
     }
+}
+
+fn exif_range(jpeg: &[u8]) -> Option<Range<usize>> {
+    let segment = app1_range(jpeg)?;
+    Some(segment.start + 4 + EXIF_PREFIX.len()..segment.end)
 }
 
 fn header(tiff: &[u8]) -> Option<(Order, usize)> {

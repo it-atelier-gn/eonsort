@@ -2,7 +2,9 @@ use crate::preview::{preview, thumbnail, Preview, Thumbnail};
 use crate::settings::{self, Settings};
 use crate::state::AppState;
 use chrono::{Local, NaiveDate, NaiveDateTime};
+use eonsort_core::companion;
 use eonsort_core::copy::{self, CopyOptions, CopyProgress, CopyReport, Outcome};
+use eonsort_core::duplicates;
 use eonsort_core::faces;
 use eonsort_core::geocode;
 use eonsort_core::model::PlanEntry;
@@ -42,6 +44,8 @@ pub struct ScanRequest {
     #[serde(default)]
     pub destination: Option<PathBuf>,
     pub folder_pattern: String,
+    #[serde(default = "default_name_pattern")]
+    pub name_pattern: String,
     pub providers: Vec<Provider>,
     pub strategy: Strategy,
     #[serde(default)]
@@ -63,7 +67,9 @@ pub struct PlanSummary {
     pub sources: Vec<PathBuf>,
     pub destination: Option<PathBuf>,
     pub folder_pattern: String,
+    pub name_pattern: String,
     pub files: u64,
+    pub left_out: u64,
     pub bytes: u64,
     pub skipped: u64,
     pub folders: u64,
@@ -167,8 +173,69 @@ pub fn check_folder_pattern(pattern: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn check_name_pattern(pattern: String) -> Result<(), String> {
+    eonsort_core::naming::validate(&pattern).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PresetView {
+    pub name: String,
+    pub folder: String,
+    pub file: String,
+    pub about: String,
+}
+
+#[tauri::command]
+pub fn list_presets() -> Vec<PresetView> {
+    eonsort_core::presets::PRESETS
+        .iter()
+        .map(|preset| PresetView {
+            name: preset.name.to_string(),
+            folder: preset.folder.to_string(),
+            file: preset.file.to_string(),
+            about: preset.about.to_string(),
+        })
+        .collect()
+}
+
+fn default_name_pattern() -> String {
+    eonsort_core::naming::DEFAULT_NAME_PATTERN.to_string()
+}
+
+#[tauri::command]
 pub fn cancel_job(state: State<'_, AppState>) {
     state.cancel.store(true, Ordering::Relaxed);
+}
+
+fn scan_options(app: &AppHandle, request: &ScanRequest) -> Result<ScanOptions, String> {
+    validate_folder_pattern(&request.folder_pattern).map_err(|e| e.to_string())?;
+    eonsort_core::naming::validate(&request.name_pattern).map_err(|e| e.to_string())?;
+    if request.sources.is_empty() {
+        return Err("add at least one source folder".into());
+    }
+    if request.providers.is_empty() {
+        return Err("enable at least one date source".into());
+    }
+
+    Ok(ScanOptions {
+        sources: request.sources.clone(),
+        destination: request.destination.clone(),
+        folder_pattern: request.folder_pattern.clone(),
+        gazetteer: request
+            .name_places
+            .then(|| models_directory(app).map(|dir| geocode::directory(&dir)))
+            .transpose()?,
+        name_pattern: request.name_pattern.clone(),
+        detect: DetectOptions {
+            providers: request.providers.clone(),
+            strategy: request.strategy,
+            weights: request.weights.clone(),
+        },
+        follow_symlinks: request.follow_symlinks,
+        auto_rotate: request.auto_rotate,
+        pair_companions: request.pair_companions,
+        upright_model_dir: request.upright.then(|| models_directory(app)).transpose()?,
+    })
 }
 
 #[tauri::command]
@@ -177,45 +244,16 @@ pub fn start_scan(
     state: State<'_, AppState>,
     request: ScanRequest,
 ) -> Result<String, String> {
-    validate_folder_pattern(&request.folder_pattern).map_err(|e| e.to_string())?;
-    if request.sources.is_empty() {
-        return Err("add at least one source folder".into());
-    }
-    if request.providers.is_empty() {
-        return Err("enable at least one date source".into());
-    }
+    let options = scan_options(&app, &request)?;
 
     let plan_path = settings::plan_directory(&app)
         .ok_or("no data directory available")?
         .join(default_plan_name(
-            &request.sources,
-            request.destination.as_deref(),
+            &options.sources,
+            options.destination.as_deref(),
         ));
 
     state.begin("A scan")?;
-
-    let options = ScanOptions {
-        sources: request.sources,
-        destination: request.destination,
-        folder_pattern: request.folder_pattern,
-        gazetteer: request
-            .name_places
-            .then(|| models_directory(&app).map(|dir| geocode::directory(&dir)))
-            .transpose()?,
-        name_pattern: eonsort_core::naming::DEFAULT_NAME_PATTERN.to_string(),
-        detect: DetectOptions {
-            providers: request.providers,
-            strategy: request.strategy,
-            weights: request.weights,
-        },
-        follow_symlinks: request.follow_symlinks,
-        auto_rotate: request.auto_rotate,
-        pair_companions: request.pair_companions,
-        upright_model_dir: request
-            .upright
-            .then(|| models_directory(&app))
-            .transpose()?,
-    };
 
     let handle = app.clone();
     let target = plan_path.clone();
@@ -270,6 +308,7 @@ pub fn start_copy(
         session.plan_path.clone().ok_or("run a scan first")?
     };
 
+    restamp(&app);
     state.begin("A copy")?;
 
     let options = CopyOptions {
@@ -871,6 +910,7 @@ pub struct DuplicateReport {
 #[derive(Debug, Clone, Serialize)]
 pub struct DuplicateView {
     pub sources: Vec<PathBuf>,
+    pub keeper: Option<PathBuf>,
     pub folder: String,
     pub bytes: u64,
     pub wasted: u64,
@@ -878,17 +918,12 @@ pub struct DuplicateView {
 
 #[tauri::command]
 pub fn find_duplicates(state: State<'_, AppState>) -> Result<DuplicateReport, String> {
-    let files: Vec<(PathBuf, u64)> = {
-        let session = state.session.lock().unwrap();
-        let plan = session.plan.as_ref().ok_or("run a scan first")?;
-        plan.entries
-            .iter()
-            .map(|e| (e.source.clone(), e.size))
-            .collect()
-    };
+    let Weighed { files, roots } = removable_files(&state)?;
 
-    let groups =
-        eonsort_core::duplicates::exact(&files, &state.cancel).map_err(|e| e.to_string())?;
+    state.begin("A search for copies")?;
+    let found = duplicates::exact(&files, &state.cancel);
+    state.finish();
+    let groups = found.map_err(|e| e.to_string())?;
     let wasted = eonsort_core::duplicates::wasted(&groups);
     let files = groups.iter().map(|group| group.sources.len()).sum();
 
@@ -904,11 +939,32 @@ pub fn find_duplicates(state: State<'_, AppState>) -> Result<DuplicateReport, St
                     .unwrap_or_default(),
                 bytes: group.bytes,
                 wasted: group.wasted,
+                keeper: keeper_first(&group.sources, &roots).into_iter().next(),
                 sources: group.sources,
             })
             .collect(),
         files,
         wasted,
+    })
+}
+
+pub struct Weighed {
+    files: Vec<(PathBuf, u64)>,
+    roots: Vec<PathBuf>,
+}
+
+fn removable_files(state: &State<'_, AppState>) -> Result<Weighed, String> {
+    let session = state.session.lock().unwrap();
+    let plan = session.plan.as_ref().ok_or("run a scan first")?;
+    let files = plan
+        .entries
+        .iter()
+        .filter(|e| !companion::is_sidecar(&e.source))
+        .map(|e| (e.source.clone(), e.size))
+        .collect();
+    Ok(Weighed {
+        files,
+        roots: plan.header.sources.clone(),
     })
 }
 
@@ -920,12 +976,19 @@ pub struct PruneReport {
     pub failures: Vec<SkippedView>,
 }
 
-fn keeper_first(sources: &[PathBuf]) -> Vec<PathBuf> {
+fn listed_under(source: &Path, roots: &[PathBuf]) -> usize {
+    roots
+        .iter()
+        .position(|root| source.starts_with(root))
+        .unwrap_or(roots.len())
+}
+
+fn keeper_first(sources: &[PathBuf], roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut ranked = sources.to_vec();
     ranked.sort_by(|a, b| {
-        a.components()
-            .count()
-            .cmp(&b.components().count())
+        listed_under(a, roots)
+            .cmp(&listed_under(b, roots))
+            .then_with(|| a.components().count().cmp(&b.components().count()))
             .then_with(|| a.as_os_str().len().cmp(&b.as_os_str().len()))
             .then_with(|| a.cmp(b))
     });
@@ -937,17 +1000,17 @@ pub fn remove_extra_copies(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PruneReport, String> {
-    let files: Vec<(PathBuf, u64)> = {
-        let session = state.session.lock().unwrap();
-        let plan = session.plan.as_ref().ok_or("run a scan first")?;
-        plan.entries
-            .iter()
-            .map(|e| (e.source.clone(), e.size))
-            .collect()
-    };
+    let Weighed { files, roots } = removable_files(&state)?;
 
-    let groups =
-        eonsort_core::duplicates::exact(&files, &state.cancel).map_err(|e| e.to_string())?;
+    state.begin("Removing extra copies")?;
+    let found = duplicates::exact(&files, &state.cancel);
+    let groups = match found {
+        Ok(groups) => groups,
+        Err(err) => {
+            state.finish();
+            return Err(err.to_string());
+        }
+    };
 
     let mut report = PruneReport {
         removed: 0,
@@ -958,13 +1021,39 @@ pub fn remove_extra_copies(
     let mut gone: Vec<PathBuf> = Vec::new();
 
     for group in groups {
+        if state.cancel.load(Ordering::Relaxed) {
+            break;
+        }
         if group.sources.len() < 2 {
             continue;
         }
-        let ranked = keeper_first(&group.sources);
+        let ranked = keeper_first(&group.sources, &roots);
+        let Some(keeper) = ranked.first().cloned() else {
+            continue;
+        };
+        if !keeper.is_file() {
+            report.failures.push(SkippedView {
+                source: keeper.clone(),
+                reason: "the copy that would have been kept is no longer there, so the others stay"
+                    .to_string(),
+            });
+            continue;
+        }
         report.kept += 1;
 
         for extra in ranked.iter().skip(1) {
+            match duplicates::look_again(&keeper, extra) {
+                duplicates::Verdict::TheKeeperItself => continue,
+                duplicates::Verdict::Removable => {}
+                held => {
+                    report.failures.push(SkippedView {
+                        source: extra.clone(),
+                        reason: format!("kept: {}", held.describe()),
+                    });
+                    continue;
+                }
+            }
+
             match trash::delete(extra) {
                 Ok(()) => {
                     report.removed += 1;
@@ -976,8 +1065,19 @@ pub fn remove_extra_copies(
                     reason: err.to_string(),
                 }),
             }
+
+            if !keeper.is_file() {
+                report.failures.push(SkippedView {
+                    source: keeper.clone(),
+                    reason: "the copy that was kept went away while the others were removed"
+                        .to_string(),
+                });
+                break;
+            }
         }
     }
+
+    state.finish();
 
     if !gone.is_empty() {
         set_excluded(app, state, gone, true)?;
@@ -1128,10 +1228,8 @@ pub fn set_excluded(
 }
 
 fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
+    let dir = settings::data_directory(app)
+        .ok_or("no data directory available")?
         .join("models");
     Ok(dir)
 }
@@ -1644,6 +1742,7 @@ pub fn start_tagging(
 
         match result {
             Ok(seen) => {
+                restamp(&handle);
                 let _ = handle.emit("tags:done", seen);
             }
             Err(err) => {
@@ -1893,6 +1992,8 @@ pub fn name_face(
         }
     }
 
+    restamp(&app);
+
     Ok(NamedFaces {
         named: usize::from(wanted.is_some()),
         alike,
@@ -1963,6 +2064,7 @@ pub fn start_face_hunt(
 
         match result {
             Ok(seen) => {
+                restamp(&handle);
                 let _ = handle.emit("faces:done", seen);
             }
             Err(err) => {
@@ -2346,11 +2448,17 @@ fn adopt(app: &AppHandle, plan_path: PathBuf, mut plan: Plan) -> Result<PlanSumm
         )
     })?;
     overrides::apply_rotations(&mut plan, &turns);
+
+    let left_out =
+        overrides::read_excluded(&overrides::excluded_path(&plan_path)).unwrap_or_default();
+    if !left_out.is_empty() {
+        plan.entries
+            .retain(|entry| !left_out.contains(&entry.source));
+    }
     annotate(&mut plan, &applied);
 
-    let summary = summarise(app, &plan_path, &plan, &journal);
+    let summary = summarise(app, &plan_path, &plan, &journal, left_out.len() as u64);
 
-    let sidecar_plan = plan_path.clone();
     let state = app.state::<AppState>();
     let mut session = state.session.lock().unwrap();
     session.plan_path = Some(plan_path);
@@ -2358,8 +2466,7 @@ fn adopt(app: &AppHandle, plan_path: PathBuf, mut plan: Plan) -> Result<PlanSumm
     session.journal = journal;
     session.overrides = applied;
     session.rotations = turns;
-    session.excluded =
-        overrides::read_excluded(&overrides::excluded_path(&sidecar_plan)).unwrap_or_default();
+    session.excluded = left_out;
 
     Ok(summary)
 }
@@ -2391,7 +2498,65 @@ fn annotate(plan: &mut Plan, applied: &Overrides) {
     }
 }
 
-fn reload(app: &AppHandle) -> Result<(), String> {
+fn stamp_from_store(app: &AppHandle) -> Result<bool, String> {
+    let plan_path = {
+        let state = app.state::<AppState>();
+        let session = state.session.lock().unwrap();
+        session.plan_path.clone()
+    };
+    let Some(plan_path) = plan_path else {
+        return Ok(false);
+    };
+
+    let store = library(app)?;
+    let mut plan = read_plan(&plan_path).map_err(|e| e.to_string())?;
+    let header = plan.header.clone();
+    let mut changed = false;
+
+    for entry in &mut plan.entries {
+        let Some(seen) = store.at(&entry.source).map_err(|e| e.to_string())? else {
+            continue;
+        };
+        let tags: Vec<String> = seen
+            .tags
+            .into_iter()
+            .filter(|tag| !quality::was_a_rating(tag))
+            .collect();
+        let subject = seen.faces.as_deref().and_then(tags::main_subject);
+        if entry.tags == tags && entry.subject == subject {
+            continue;
+        }
+        entry.tags = tags;
+        entry.subject = subject;
+        entry.destination = header
+            .destination_of(entry, entry.taken)
+            .map_err(|e| e.to_string())?;
+        changed = true;
+    }
+
+    if changed {
+        eonsort_core::plan::rewrite(&plan_path, &plan).map_err(|e| e.to_string())?;
+    }
+    Ok(changed)
+}
+
+fn restamp(app: &AppHandle) {
+    if let Ok(true) = stamp_from_store(app) {
+        if let Ok(summary) = reload(app) {
+            let _ = app.emit("plan:changed", summary);
+        }
+    }
+}
+
+#[tauri::command]
+pub fn list_left_out(state: State<'_, AppState>) -> Vec<PathBuf> {
+    let session = state.session.lock().unwrap();
+    let mut held: Vec<PathBuf> = session.excluded.iter().cloned().collect();
+    held.sort();
+    held
+}
+
+fn reload(app: &AppHandle) -> Result<PlanSummary, String> {
     let plan_path = {
         let state = app.state::<AppState>();
         let session = state.session.lock().unwrap();
@@ -2399,8 +2564,7 @@ fn reload(app: &AppHandle) -> Result<(), String> {
     };
     let plan_path = plan_path.ok_or("no plan is open")?;
     let plan = read_plan(&plan_path).map_err(|e| e.to_string())?;
-    adopt(app, plan_path, plan)?;
-    Ok(())
+    adopt(app, plan_path, plan)
 }
 
 fn store(app: &AppHandle, applied: &Overrides) -> Result<(), String> {
@@ -2421,11 +2585,25 @@ fn refresh_journal(app: &AppHandle) {
     }
 }
 
+fn tally(
+    journal: &std::collections::HashMap<PathBuf, Outcome>,
+    plan: &Plan,
+    pred: fn(&Outcome) -> bool,
+) -> u64 {
+    let planned: std::collections::HashSet<&PathBuf> =
+        plan.entries.iter().map(|entry| &entry.source).collect();
+    journal
+        .iter()
+        .filter(|(source, outcome)| planned.contains(source) && pred(outcome))
+        .count() as u64
+}
+
 fn summarise(
     app: &AppHandle,
     plan_path: &Path,
     plan: &Plan,
     journal: &std::collections::HashMap<PathBuf, Outcome>,
+    left_out: u64,
 ) -> PlanSummary {
     let mut settings = settings::load(app);
     settings.last_plan = Some(plan_path.to_path_buf());
@@ -2437,14 +2615,16 @@ fn summarise(
         .map(|e| relative_folder(e, plan.header.root()))
         .collect();
 
-    let count = |pred: fn(&Outcome) -> bool| journal.values().filter(|o| pred(o)).count() as u64;
+    let count = |pred: fn(&Outcome) -> bool| tally(journal, plan, pred);
 
     PlanSummary {
         plan_path: plan_path.to_string_lossy().into_owned(),
         sources: plan.header.sources.clone(),
         destination: plan.header.destination.clone(),
         folder_pattern: plan.header.folder_pattern.clone(),
+        name_pattern: plan.header.name_pattern.clone(),
         files: plan.entries.len() as u64,
+        left_out,
         bytes: plan.total_bytes(),
         skipped: plan.skipped.len() as u64,
         folders: folders.len() as u64,
@@ -2549,7 +2729,7 @@ mod crooked_tests {
         tiff.extend_from_slice(&0u32.to_be_bytes());
 
         let mut app1 = Vec::new();
-        app1.extend_from_slice(b"Exif  ");
+        app1.extend_from_slice(b"Exif\0\0");
         app1.extend_from_slice(&tiff);
 
         let mut out = Vec::new();
@@ -2648,35 +2828,66 @@ mod tests {
             PathBuf::from("/photos/a.jpg"),
             PathBuf::from("/photos/backup/a.jpg"),
         ];
-        let ranked = keeper_first(&sources);
+        let ranked = keeper_first(&sources, &[PathBuf::from("/photos")]);
         assert_eq!(ranked[0], PathBuf::from("/photos/a.jpg"));
         assert_eq!(ranked.len(), sources.len());
     }
 
     #[test]
+    fn the_folder_added_first_holds_the_copy_that_is_kept() {
+        let roots = vec![PathBuf::from("/photos"), PathBuf::from("/backup")];
+        let sources = vec![
+            PathBuf::from("/backup/a.jpg"),
+            PathBuf::from("/photos/2023/05/a.jpg"),
+        ];
+
+        assert_eq!(
+            keeper_first(&sources, &roots)[0],
+            PathBuf::from("/photos/2023/05/a.jpg"),
+            "a shallower backup outranked the folder listed first"
+        );
+    }
+
+    #[test]
+    fn a_copy_under_no_source_at_all_is_ranked_last() {
+        let roots = vec![PathBuf::from("/photos")];
+        let sources = vec![
+            PathBuf::from("/elsewhere/a.jpg"),
+            PathBuf::from("/photos/2023/05/06/a.jpg"),
+        ];
+
+        assert_eq!(
+            keeper_first(&sources, &roots)[0],
+            PathBuf::from("/photos/2023/05/06/a.jpg")
+        );
+    }
+
+    #[test]
     fn copies_at_the_same_depth_are_kept_in_a_settled_order() {
+        let roots = vec![PathBuf::from("/photos")];
         let sources = vec![
             PathBuf::from("/photos/zebra.jpg"),
             PathBuf::from("/photos/apple.jpg"),
         ];
         assert_eq!(
-            keeper_first(&sources)[0],
+            keeper_first(&sources, &roots)[0],
             PathBuf::from("/photos/apple.jpg")
         );
         assert_eq!(
-            keeper_first(&sources),
-            keeper_first(&keeper_first(&sources))
+            keeper_first(&sources, &roots),
+            keeper_first(&keeper_first(&sources, &roots), &roots)
         );
     }
 
     #[test]
     fn no_copy_is_lost_on_the_way_through_the_ranking() {
+        let roots = vec![PathBuf::from("/a")];
         let sources = vec![
             PathBuf::from("/a/b/c/one.jpg"),
             PathBuf::from("/a/two.jpg"),
             PathBuf::from("/a/b/three.jpg"),
         ];
-        let mut ranked = keeper_first(&sources);
+        let mut ranked = keeper_first(&sources, &roots);
         ranked.sort();
         let mut original = sources.clone();
         original.sort();
@@ -2696,6 +2907,60 @@ mod tests {
             size: 1,
             ..PlanEntry::default()
         }
+    }
+
+    fn entry_from(source: &str) -> PlanEntry {
+        PlanEntry {
+            source: PathBuf::from(source),
+            ..entry("/out/a.jpg")
+        }
+    }
+
+    fn plan_of(sources: &[&str]) -> Plan {
+        Plan {
+            header: eonsort_core::model::PlanHeader {
+                version: eonsort_core::model::PLAN_VERSION,
+                created_at: NaiveDate::from_ymd_opt(2023, 5, 6)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+                sources: vec![PathBuf::from("/src")],
+                destination: Some(PathBuf::from("/out")),
+                folder_pattern: eonsort_core::model::DEFAULT_FOLDER_PATTERN.to_string(),
+                name_pattern: eonsort_core::naming::DEFAULT_NAME_PATTERN.to_string(),
+                detect: DetectOptions::default(),
+            },
+            entries: sources.iter().map(|it| entry_from(it)).collect(),
+            skipped: Vec::new(),
+        }
+    }
+
+    fn copied(destination: &str) -> Outcome {
+        Outcome::Copied {
+            destination: PathBuf::from(destination),
+        }
+    }
+
+    #[test]
+    fn the_totals_only_count_files_the_plan_still_holds() {
+        let plan = plan_of(&["/src/a.jpg"]);
+        let journal = std::collections::HashMap::from([
+            (PathBuf::from("/src/a.jpg"), copied("/out/a.jpg")),
+            (PathBuf::from("/src/gone.jpg"), copied("/out/gone.jpg")),
+        ]);
+
+        let count = tally(&journal, &plan, |o| matches!(o, Outcome::Copied { .. }));
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn a_plan_that_copied_nothing_counts_nothing() {
+        let plan = plan_of(&["/src/a.jpg"]);
+        let journal = std::collections::HashMap::new();
+        assert_eq!(
+            tally(&journal, &plan, |o| matches!(o, Outcome::Copied { .. })),
+            0
+        );
     }
 
     #[test]

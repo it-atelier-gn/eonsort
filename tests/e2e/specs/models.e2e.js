@@ -89,7 +89,7 @@ describe("The models behind tagging", () => {
   it("offers the tagging model, or says the build has none, once tagging is on", async () => {
     await settle({ ...original, tag_pictures: true, rate_quality: false });
     const status = await value("tag_model_status", {});
-    const line = await $(".model-line");
+    const line = await $('[data-model="tagging"]');
     await line.waitForExist({ timeout: 10000 });
 
     if (!status.built_in) {
@@ -104,13 +104,14 @@ describe("The models behind tagging", () => {
   it("only offers judging once tagging is on, and its own model with it", async () => {
     await settle({ ...original, tag_pictures: true, rate_quality: true });
     const status = await value("quality_model_status", {});
-    const lines = await $$(".model-line");
-    expect(lines.length).toBe(2);
+    const line = await $('[data-model="quality"]');
+    await line.waitForExist({ timeout: 10000 });
+    await expect(await $('[data-model="tagging"]')).toExist();
 
     if (!status.built_in) {
-      await expect(lines[1]).toHaveText(expect.stringContaining("without the quality model"));
+      await expect(line).toHaveText(expect.stringContaining("without the quality model"));
     } else if (status.present) {
-      await expect(lines[1]).toHaveText(expect.stringContaining("Quality model ready"));
+      await expect(line).toHaveText(expect.stringContaining("Quality model ready"));
     } else {
       await expect(await $("button=Get the quality model")).toExist();
     }

@@ -1,14 +1,21 @@
 use eonsort_core::model::DEFAULT_FOLDER_PATTERN;
+use eonsort_core::naming::DEFAULT_NAME_PATTERN;
 use eonsort_core::providers::{clean_weights, Provider, Strategy, Weights};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 fn yes() -> bool {
     true
 }
 
+fn default_name_pattern() -> String {
+    DEFAULT_NAME_PATTERN.to_string()
+}
+
 const FILE_NAME: &str = "settings.json";
+const DIR_NAME: &str = "eonsort";
+const ROOT_VAR: &str = "EONSORT_HOME";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -16,6 +23,8 @@ pub struct Settings {
     pub sources: Vec<PathBuf>,
     pub destination: Option<PathBuf>,
     pub folder_pattern: String,
+    #[serde(default = "default_name_pattern")]
+    pub name_pattern: String,
     pub providers: Vec<Provider>,
     pub strategy: Strategy,
     #[serde(default)]
@@ -47,6 +56,7 @@ impl Default for Settings {
             sources: Vec::new(),
             destination: None,
             folder_pattern: DEFAULT_FOLDER_PATTERN.to_string(),
+            name_pattern: default_name_pattern(),
             providers: Provider::DEFAULT.to_vec(),
             strategy: Strategy::default(),
             weights: Weights::new(),
@@ -86,14 +96,32 @@ pub fn save(app: &AppHandle, settings: &Settings) -> Result<(), String> {
     std::fs::write(&path, raw).map_err(|e| e.to_string())
 }
 
+pub fn data_directory(app: &AppHandle) -> Option<PathBuf> {
+    Some(rooted(chosen_root(), &app.path().data_dir().ok()?))
+}
+
 pub fn plan_directory(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app.path().app_data_dir().ok()?.join("plans");
+    let dir = data_directory(app)?.join("plans");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }
 
+fn ours(base: &Path) -> PathBuf {
+    base.join(DIR_NAME)
+}
+
+fn chosen_root() -> Option<PathBuf> {
+    std::env::var_os(ROOT_VAR)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn rooted(chosen: Option<PathBuf>, usual: &Path) -> PathBuf {
+    chosen.unwrap_or_else(|| ours(usual))
+}
+
 fn path(app: &AppHandle) -> Option<PathBuf> {
-    Some(app.path().app_config_dir().ok()?.join(FILE_NAME))
+    Some(rooted(chosen_root(), &app.path().config_dir().ok()?).join(FILE_NAME))
 }
 
 #[cfg(test)]
@@ -101,10 +129,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn everything_lives_under_one_folder_named_for_the_program() {
+        let base = Path::new("/base");
+        assert_eq!(ours(base), Path::new("/base/eonsort"));
+        assert_eq!(
+            ours(base).join(FILE_NAME),
+            Path::new("/base/eonsort/settings.json")
+        );
+    }
+
+    #[test]
+    fn a_folder_of_its_own_takes_the_place_of_the_usual_one() {
+        let usual = Path::new("/base");
+        assert_eq!(rooted(None, usual), Path::new("/base/eonsort"));
+        assert_eq!(
+            rooted(Some(PathBuf::from("/elsewhere")), usual),
+            Path::new("/elsewhere")
+        );
+    }
+
+    #[test]
     fn settings_written_before_the_weights_existed_still_read() {
         let held: Settings = serde_json::from_str(r#"{"providers":["exif"]}"#).unwrap();
         assert_eq!(held.providers, vec![Provider::Exif]);
         assert!(held.weights.is_empty());
+    }
+
+    #[test]
+    fn settings_written_before_the_name_pattern_existed_still_read() {
+        let held: Settings = serde_json::from_str(r#"{"providers":["exif"]}"#).unwrap();
+        assert_eq!(held.name_pattern, DEFAULT_NAME_PATTERN);
     }
 
     #[test]

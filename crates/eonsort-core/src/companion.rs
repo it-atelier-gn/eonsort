@@ -40,6 +40,13 @@ fn extension_of(name: &str) -> &str {
     name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("")
 }
 
+pub fn is_sidecar(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| kind(extension_of(&name.to_ascii_lowercase())) == Kind::Sidecar)
+        .unwrap_or(false)
+}
+
 pub fn group_key(path: &Path) -> Option<(PathBuf, String)> {
     let parent = path.parent()?.to_path_buf();
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
@@ -126,6 +133,21 @@ mod tests {
     use super::*;
     use crate::providers::Provider;
     use chrono::{NaiveDate, NaiveDateTime};
+
+    #[test]
+    fn the_files_that_belong_to_a_picture_are_known_as_sidecars() {
+        assert!(is_sidecar(Path::new("/photos/IMG_0001.jpg.xmp")));
+        assert!(is_sidecar(Path::new("/photos/IMG_0001.AAE")));
+        assert!(is_sidecar(Path::new("/photos/IMG_0001.jpg.json")));
+        assert!(is_sidecar(Path::new("/photos/CLIP.THM")));
+    }
+
+    #[test]
+    fn a_picture_is_not_a_sidecar() {
+        assert!(!is_sidecar(Path::new("/photos/IMG_0001.jpg")));
+        assert!(!is_sidecar(Path::new("/photos/CLIP.mp4")));
+        assert!(!is_sidecar(Path::new("/photos/notes")));
+    }
 
     fn at(y: i32, m: u32, d: u32, hh: u32) -> NaiveDateTime {
         NaiveDate::from_ymd_opt(y, m, d)

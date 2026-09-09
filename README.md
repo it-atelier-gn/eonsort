@@ -157,12 +157,20 @@ eonsort sort --source samples --destination sorted --pattern '%Y/{city|country|"
 Contributions are welcome. For substantial changes, open an issue first.
 
 ```sh
-cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace && npm run check && npm test
+npm run gate
 ```
 
-The optional features are not in that line; CI checks them in separate non-blocking jobs. If you
-touch `upright.rs`, `yolo.rs`, `tagging.rs`, `quality.rs`, `yunet.rs`, `sface.rs` or `faces.rs`, run
-clippy and the tests with the matching feature as well.
+That is what the build checks, in the same order. Each part runs on its own as well.
+
+| Command                | What it checks                                                     |
+| ---------------------- | ------------------------------------------------------------------ |
+| `npm run gate:fmt`     | Formatting across the workspace                                    |
+| `npm run gate:clippy`  | Clippy over every target, warnings fatal                           |
+| `npm run gate:test`    | Frontend build, types, and both test suites                        |
+| `npm run gate:upright` | The `upright` feature                                              |
+| `npm run gate:tagging` | The `tagging` and `quality` features                               |
+| `npm run gate:faces`   | The `faces` feature                                                |
+| `npm run gate:audit`   | Advisories against the dependency tree, via `cargo install cargo-audit` |
 
 The application icon is generated. To change it, edit `scripts/make-icon.mjs` and run `npm run icon`.
 

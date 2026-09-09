@@ -71,6 +71,25 @@ impl Tags {
     }
 }
 
+pub fn main_subject(spots: &[Spot]) -> Option<String> {
+    spots
+        .iter()
+        .filter_map(|spot| {
+            let label = spot
+                .label
+                .as_deref()
+                .map(str::trim)
+                .filter(|it| !it.is_empty())?;
+            Some((spot.width * spot.height, label))
+        })
+        .max_by(|(one, left), (two, right)| {
+            one.partial_cmp(two)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| right.cmp(left))
+        })
+        .map(|(_, label)| label.to_string())
+}
+
 pub fn library_path(data_dir: &Path) -> PathBuf {
     data_dir.join("sightings.db")
 }
@@ -1187,6 +1206,43 @@ mod tests {
 
     fn store() -> Store {
         Store::open(Path::new(":memory:")).unwrap()
+    }
+
+    fn named_spot(width: f32, height: f32, label: Option<&str>) -> Spot {
+        Spot {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height,
+            score: 0.9,
+            label: label.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn the_biggest_named_face_becomes_the_subject() {
+        let spots = vec![
+            named_spot(10.0, 10.0, Some("Ada")),
+            named_spot(40.0, 40.0, Some("Grace")),
+            named_spot(80.0, 80.0, None),
+        ];
+        assert_eq!(main_subject(&spots), Some("Grace".to_string()));
+    }
+
+    #[test]
+    fn faces_nobody_named_leave_the_subject_empty() {
+        assert_eq!(main_subject(&[named_spot(40.0, 40.0, None)]), None);
+        assert_eq!(main_subject(&[named_spot(40.0, 40.0, Some("  "))]), None);
+        assert_eq!(main_subject(&[]), None);
+    }
+
+    #[test]
+    fn two_faces_of_a_size_settle_on_the_earlier_name() {
+        let spots = vec![
+            named_spot(20.0, 20.0, Some("Grace")),
+            named_spot(20.0, 20.0, Some("Ada")),
+        ];
+        assert_eq!(main_subject(&spots), Some("Ada".to_string()));
     }
 
     fn shelf() -> (Store, TempDir) {

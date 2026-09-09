@@ -87,8 +87,11 @@ pub fn scan(
         detect: options.detect.clone(),
     };
 
-    let resumed = resumable(plan_path, &header);
-    let done: HashSet<PathBuf> = resumed
+    let resumed = match resumable(plan_path, &header) {
+        Some(plan) => Some(forget_the_vanished(plan_path, plan)?),
+        None => None,
+    };
+    let mut done: HashSet<PathBuf> = resumed
         .as_ref()
         .map(|p| p.analysed_sources())
         .unwrap_or_default();
@@ -118,7 +121,7 @@ pub fn scan(
         check_cancelled(cancel)?;
         let Ok(meta) = entry.metadata() else { continue };
         let path = entry.into_path();
-        if done.contains(&path) {
+        if !done.insert(path.clone()) {
             continue;
         }
         batch.push((path, meta));
@@ -159,11 +162,24 @@ pub fn scan(
     Ok(plan)
 }
 
+fn forget_the_vanished(plan_path: &Path, mut plan: Plan) -> Result<Plan> {
+    let held = plan.entries.len() + plan.skipped.len();
+    plan.entries
+        .retain(|entry| entry.source.symlink_metadata().is_ok());
+    plan.skipped
+        .retain(|skipped| skipped.source.symlink_metadata().is_ok());
+    if plan.entries.len() + plan.skipped.len() != held {
+        crate::plan::rewrite(plan_path, &plan)?;
+    }
+    Ok(plan)
+}
+
 fn resumable(plan_path: &Path, header: &PlanHeader) -> Option<Plan> {
     let plan = read_plan(plan_path).ok()?;
     let compatible = plan.header.sources == header.sources
         && plan.header.destination == header.destination
         && plan.header.folder_pattern == header.folder_pattern
+        && plan.header.name_pattern == header.name_pattern
         && plan.header.detect == header.detect;
     compatible.then_some(plan)
 }
@@ -480,6 +496,77 @@ mod tests {
     }
 
     #[test]
+    fn a_file_deleted_since_the_last_scan_leaves_the_plan() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("IMG_20230506_101112.jpg"), b"one").unwrap();
+        fs::write(src.join("IMG_20240101_000000.jpg"), b"two").unwrap();
+
+        let plan_path = dir.path().join("plan.jsonl");
+        let opts = options(vec![src.clone()], dir.path().join("out"));
+        assert_eq!(
+            scan(&plan_path, &opts, &AtomicBool::new(false), &noop)
+                .unwrap()
+                .entries
+                .len(),
+            2
+        );
+
+        fs::remove_file(src.join("IMG_20230506_101112.jpg")).unwrap();
+        let plan = scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
+
+        assert_eq!(plan.entries.len(), 1);
+        assert!(plan.entries[0].source.ends_with("IMG_20240101_000000.jpg"));
+        assert_eq!(
+            read_plan(&plan_path).unwrap().entries.len(),
+            1,
+            "the plan on disk still holds the deleted file"
+        );
+    }
+
+    #[test]
+    fn a_skipped_file_deleted_since_the_last_scan_leaves_the_plan() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("mystery.bin"), b"one").unwrap();
+
+        let plan_path = dir.path().join("plan.jsonl");
+        let mut opts = options(vec![src.clone()], dir.path().join("out"));
+        opts.detect.providers = vec![Provider::Filename];
+        assert_eq!(
+            scan(&plan_path, &opts, &AtomicBool::new(false), &noop)
+                .unwrap()
+                .skipped
+                .len(),
+            1
+        );
+
+        fs::remove_file(src.join("mystery.bin")).unwrap();
+        let plan = scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
+
+        assert!(plan.skipped.is_empty());
+        assert!(read_plan(&plan_path).unwrap().skipped.is_empty());
+    }
+
+    #[test]
+    fn a_plan_that_lost_nothing_is_left_as_it_was() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("IMG_20230506_101112.jpg"), b"one").unwrap();
+
+        let plan_path = dir.path().join("plan.jsonl");
+        let opts = options(vec![src], dir.path().join("out"));
+        scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
+        let written = fs::read_to_string(&plan_path).unwrap();
+
+        scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
+        assert_eq!(fs::read_to_string(&plan_path).unwrap(), written);
+    }
+
+    #[test]
     fn starts_over_when_the_options_changed() {
         let dir = tempdir().unwrap();
         let src = dir.path().join("src");
@@ -504,6 +591,41 @@ mod tests {
         assert!(plan.entries[0]
             .destination
             .ends_with("2023/IMG_20230506_101112.jpg"));
+    }
+
+    #[test]
+    fn starts_over_when_the_name_pattern_changed() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("IMG_20230506_101112.jpg"), b"one").unwrap();
+
+        let plan_path = dir.path().join("plan.jsonl");
+        let opts = options(vec![src], dir.path().join("out"));
+        scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
+
+        let mut changed = opts.clone();
+        changed.name_pattern = "%Y%m%d-%H%M%S".to_string();
+        let plan = scan(&plan_path, &changed, &AtomicBool::new(false), &noop).unwrap();
+
+        assert_eq!(plan.entries.len(), 1);
+        assert!(plan.entries[0].destination.ends_with("20230506-101112.jpg"));
+    }
+
+    #[test]
+    fn a_folder_listed_inside_another_source_plans_its_files_once() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src");
+        let inner = src.join("2023");
+        fs::create_dir_all(&inner).unwrap();
+        fs::write(inner.join("IMG_20230506_101112.jpg"), b"one").unwrap();
+
+        let plan_path = dir.path().join("plan.jsonl");
+        let opts = options(vec![src.clone(), inner.clone()], dir.path().join("out"));
+        let plan = scan(&plan_path, &opts, &AtomicBool::new(false), &noop).unwrap();
+
+        assert_eq!(plan.entries.len(), 1);
+        assert_eq!(read_plan(&plan_path).unwrap().entries.len(), 1);
     }
 
     #[test]

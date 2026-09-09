@@ -12,10 +12,12 @@
     installGazetteer,
     installQualityModel,
     installTagModel,
+    listPresets,
     qualityModelStatus,
     tagModelStatus,
     type FaceStatus,
     type GazetteerStatus,
+    type Preset,
     type TagModelStatus,
   } from "$lib/api";
   import type { Provider, Settings, Strategy } from "$lib/api";
@@ -37,6 +39,7 @@
     settings: Settings;
     busy: boolean;
     patternError: string | null;
+    namePatternError: string | null;
     tagging: boolean;
     looked: number;
     pictures: boolean;
@@ -49,6 +52,7 @@
     settings,
     busy,
     patternError,
+    namePatternError,
     tagging,
     looked,
     pictures,
@@ -71,8 +75,15 @@
   let placesFetched = $state<{ completed: number; total: number } | null>(null);
   let placesError = $state<string | null>(null);
   let stops: UnlistenFn[] = [];
+  let presets = $state<Preset[]>([]);
+  let chosen = $state<Preset | null>(null);
 
   onMount(async () => {
+    try {
+      presets = await listPresets();
+    } catch {
+      presets = [];
+    }
     await refreshTagModel();
     await refreshQualityModel();
     await refreshFaceModel();
@@ -199,6 +210,13 @@
     { id: "oldest", label: "Oldest date wins", hint: "Ask every source, keep the earliest" },
     { id: "priority", label: "First match wins", hint: "Stop at the first source with a date" },
   ];
+
+  function applyPreset(name: string) {
+    const preset = presets.find((it) => it.name === name) ?? null;
+    chosen = preset;
+    if (preset === null) return;
+    onChange({ ...settings, folder_pattern: preset.folder, name_pattern: preset.file });
+  }
 
   async function addSources() {
     const picked = await open({ directory: true, multiple: true, title: "Add source folders" });
@@ -341,6 +359,34 @@
       <p class="error">{patternError}</p>
     {:else}
       <p class="faint hint">%Y year, %m month, %d day &mdash; e.g. %Y/%m gives 2023/05</p>
+    {/if}
+
+    <label for="name-pattern">File names</label>
+    <input
+      id="name-pattern"
+      type="text"
+      class="mono"
+      value={settings.name_pattern}
+      disabled={busy}
+      oninput={(e) => onChange({ ...settings, name_pattern: e.currentTarget.value })}
+    />
+    {#if namePatternError}
+      <p class="error">{namePatternError}</p>
+    {:else}
+      <p class="faint hint">
+        {"{original_stem}"} keeps the name it came with &mdash; e.g. %Y%m%d-%H%M%S
+      </p>
+    {/if}
+
+    <label for="preset">Ready-made layouts</label>
+    <select id="preset" disabled={busy} onchange={(e) => applyPreset(e.currentTarget.value)}>
+      <option value="">Choose a layout&hellip;</option>
+      {#each presets as preset (preset.name)}
+        <option value={preset.name} title={preset.about}>{preset.name}</option>
+      {/each}
+    </select>
+    {#if chosen}
+      <p class="faint hint">{chosen.about}</p>
     {/if}
   </section>
 
@@ -526,7 +572,7 @@
       <code>{"{country}"}</code> can be used in the folder pattern. Nothing is sent anywhere.
     </p>
     {#if settings.name_places}
-      <div class="model-line">
+      <div class="model-line" data-model="places">
         {#if gazetteer?.present}
           <span class="faint tiny">
             Place names ready · {formatBytes(gazetteer.bytes)}
@@ -569,7 +615,7 @@
       the preview, and the search box finds pictures by what is in them.
     </p>
     {#if settings.tag_pictures}
-      <div class="model-line">
+      <div class="model-line" data-model="tagging">
         {#if tagModel && !tagModel.built_in}
           <span class="faint tiny">This build was made without the tagging model.</span>
         {:else if tagModel?.present}
@@ -615,7 +661,7 @@
       </p>
 
       {#if settings.rate_quality}
-        <div class="model-line">
+        <div class="model-line" data-model="quality">
           {#if qualityModel && !qualityModel.built_in}
             <span class="faint tiny">This build was made without the quality model.</span>
           {:else if qualityModel?.present}

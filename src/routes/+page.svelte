@@ -7,6 +7,7 @@
     baseName,
     cancelJob,
     checkFolderPattern,
+    checkNamePattern,
     clearDateOverride,
     clearRotation,
     formatBytes,
@@ -16,6 +17,7 @@
     faceStatus,
     listAllEntries,
     listFaces,
+    listLeftOut,
     listNames,
     listTags,
     nameFace,
@@ -51,6 +53,7 @@
     findLookalikes,
     findDuplicates,
     removeExtraCopies,
+    setExcluded,
     type BurstView,
     type LookalikeView,
     type CopyProgress,
@@ -73,7 +76,7 @@
     type VerifyReport,
   } from "$lib/api";
   import { buildTree, foldersOf, under, type TreeNode } from "$lib/tree";
-  import { listed, removableCopies, tallyBursts } from "$lib/copies";
+  import { anyOnAShare, listed, removableCopies, tallyBursts } from "$lib/copies";
   import ColumnHead from "$lib/components/ColumnHead.svelte";
   import {
     cleanOrder,
@@ -114,6 +117,7 @@
     type Sorted,
   } from "$lib/ordering";
   import PreviewPane from "$lib/components/PreviewPane.svelte";
+  import CompareStrip from "$lib/components/CompareStrip.svelte";
   import DateFixPanel from "$lib/components/DateFixPanel.svelte";
   import TimeScape from "$lib/components/TimeScape.svelte";
   import ChartsPanel from "$lib/components/ChartsPanel.svelte";
@@ -190,9 +194,18 @@
   let duplicates = $state<DuplicateReport | null>(null);
   let pruneAsked = $state(false);
   let pruning = $state(false);
+  let pruneKept = $state<SkippedView[]>([]);
   let bursts = $state<BurstView[]>([]);
   let lookalikes = $state<LookalikeView[]>([]);
+  let comparing = $state<{ key: string; sources: string[]; keeper: string | null } | null>(null);
 
+  function compare(key: string, sources: string[], keeper: string | null) {
+    comparing = comparing?.key === key ? null : { key, sources, keeper };
+  }
+
+  const entriesBySource = $derived(
+    Object.fromEntries(timelineEntries.map((entry) => [entry.source, entry])),
+  );
   const identicalList = $derived(listed(duplicates?.groups ?? []));
   const burstList = $derived(listed(bursts));
   const burstTally = $derived(tallyBursts(bursts));
@@ -222,10 +235,13 @@
     try {
       const report = await removeExtraCopies();
       pruneAsked = false;
+      pruneKept = report.failures;
       notice =
         `Sent ${report.removed.toLocaleString()} copies to the recycle bin, ` +
         `${formatBytes(report.freed)} freed, one of each kept.` +
-        (report.failures.length > 0 ? ` ${report.failures.length} could not be removed.` : "");
+        (report.failures.length > 0
+          ? ` ${report.failures.length} left alone; the reasons are listed below.`
+          : "");
       [duplicates, bursts, lookalikes] = await Promise.all([
         findDuplicates(),
         findBursts(),
@@ -242,6 +258,9 @@
   let notice = $state<string | null>(null);
   let error = $state<string | null>(null);
   let patternError = $state<string | null>(null);
+  let namePatternError = $state<string | null>(null);
+  let leftOut = $state<string[]>([]);
+  let leftOutOpen = $state(false);
 
   let columnOrder = $state<TreeColumnId[]>(rememberedOrder(TREE_COLUMNS));
   let columnWidths = $state<ColumnWidths<TreeColumnId>>(rememberedWidths(TREE_COLUMNS));
@@ -452,7 +471,8 @@
       settings !== null &&
       settings.sources.length > 0 &&
       settings.providers.length > 0 &&
-      patternError === null,
+      patternError === null &&
+      namePatternError === null,
   );
   const canRun = $derived(
     !busy && summary !== null && summary.files > 0 && summary.destination !== null,
@@ -604,11 +624,17 @@
         issuesOpen = e.payload.report.issues.length > 0;
       }),
       listen<string>("verify:error", (e) => fail(e.payload)),
+      listen<PlanSummary>("plan:changed", async (e) => {
+        summary = e.payload;
+        leftOut = await listLeftOut();
+        await refreshTree(false);
+      }),
     ]);
 
     if (settings.last_plan) {
       try {
         summary = await openPlan(settings.last_plan);
+        leftOut = await listLeftOut();
         await refreshTree(true);
         notice = "Reopened the last plan.";
       } catch {
@@ -647,6 +673,12 @@
       patternError = null;
     } catch (e) {
       patternError = String(e);
+    }
+    try {
+      await checkNamePattern(next.name_pattern);
+      namePatternError = null;
+    } catch (e) {
+      namePatternError = String(e);
     }
     await saveSettings(next);
 
@@ -1042,6 +1074,7 @@
         sources: settings!.sources,
         destination: settings!.destination,
         folder_pattern: settings!.folder_pattern,
+        name_pattern: settings!.name_pattern,
         providers: settings!.providers,
         strategy: settings!.strategy,
         weights: settings!.weights ?? {},
@@ -1056,6 +1089,32 @@
     run("copy", () =>
       startCopy(settings!.preserve_times, settings!.stamp_date, settings!.write_sidecars),
     );
+
+  async function leaveOut(sources: string[]) {
+    try {
+      await setExcluded(sources, true);
+      marked = [];
+      summary = await openPlan(summary!.plan_path);
+      leftOut = await listLeftOut();
+      await refreshTree(false);
+      notice = `Left out ${sources.length.toLocaleString()} ${sources.length === 1 ? "file" : "files"}.`;
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function bringBack(sources: string[]) {
+    try {
+      await setExcluded(sources, false);
+      summary = await openPlan(summary!.plan_path);
+      leftOut = await listLeftOut();
+      await refreshTree(false);
+      if (leftOut.length === 0) leftOutOpen = false;
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   const check = () => run("verify", () => startVerify(settings!.compare_hashes));
 
   async function openInSystem(path: string) {
@@ -1275,6 +1334,7 @@
         {settings}
         {busy}
         {patternError}
+        {namePatternError}
         {tagging}
         looked={Object.keys(tagsBySource).length}
         pictures={timelineEntries.length > 0}
@@ -1377,6 +1437,7 @@
         busy={fixing || busy}
         onOpen={openInSystem}
         onReveal={reveal}
+        onLeaveOut={(source) => void leaveOut([source])}
         onLike={(source) => void lookLike(source)}
         onChoose={chooseDate}
         onRevert={revertDate}
@@ -1400,8 +1461,34 @@
       onShift={shiftMarked}
       onReprovider={reproviderMarked}
       onRotate={rotateMarkedFiles}
+      onLeaveOut={() => void leaveOut(marked)}
       onClear={() => (marked = [])}
     />
+  {/if}
+
+  {#if leftOutOpen}
+    <section class="issues scroll">
+      <div class="issues-head">
+        <strong>Files left out of the plan</strong>
+        <span class="heads">
+          <button class="ghost" onclick={() => void bringBack(leftOut)} disabled={busy}>
+            Bring all back
+          </button>
+          <button class="ghost" onclick={() => (leftOutOpen = false)}>Close</button>
+        </span>
+      </div>
+      <p class="faint">
+        These stay where they are. Nothing copies them, and they count for nothing in the totals.
+      </p>
+      {#each leftOut as path (path)}
+        <p>
+          <span class="mono" title={path}>{path}</span>
+          <button class="ghost" onclick={() => void bringBack([path])} disabled={busy}>
+            Bring back
+          </button>
+        </p>
+      {/each}
+    </section>
   {/if}
 
   {#if copiesOpen}
@@ -1426,9 +1513,18 @@
             <div class="prune">
               {#if pruneAsked}
                 <span class="warnText">
-                  This sends {removableCopies(duplicates).toLocaleString()} files to the recycle bin,
-                  keeping the copy nearest the top of each folder tree. Bursts are left alone. Sure?
+                  This sends {removableCopies(duplicates).toLocaleString()} files to the recycle bin.
+                  Of each set it keeps the copy in the source folder you added first, and reads every
+                  file again just before removing it, so anything that changed since the search stays.
+                  Bursts, lookalikes and sidecar files are left alone. Press Compare on a set to see
+                  what goes. Sure?
                 </span>
+                {#if anyOnAShare(duplicates.groups)}
+                  <span class="warnText">
+                    Some of these sit on a network share, where Windows deletes outright instead of
+                    into the recycle bin.
+                  </span>
+                {/if}
                 <button class="danger" disabled={pruning} onclick={() => void pruneCopies()}>
                   {pruning ? "Removing…" : "Yes, remove them"}
                 </button>
@@ -1447,13 +1543,43 @@
               {/if}
             </div>
             {#each identicalList.shown as group (group.sources[0])}
-              <button class="suspect" onclick={() => marked = group.sources}>
-                <span class="badge info">{group.sources.length} identical</span>
-                <span class="reason">{formatBytes(group.wasted)} of it repeated.</span>
-                <span class="mono faint truncate">{group.folder}</span>
-                <span class="mono faint truncate">{group.sources.map(baseName).join(" · ")}</span>
-              </button>
+              <div class="group-row">
+                <button class="suspect" onclick={() => marked = group.sources}>
+                  <span class="badge info">{group.sources.length} identical</span>
+                  <span class="reason">{formatBytes(group.wasted)} of it repeated.</span>
+                  <span class="mono faint truncate">{group.folder}</span>
+                  <span class="mono faint truncate">{group.sources.map(baseName).join(" · ")}</span>
+                </button>
+                <button
+                  class="ghost"
+                  onclick={() => compare(group.sources[0], group.sources, group.keeper)}
+                  title="Look at every copy in this group side by side"
+                >
+                  {comparing?.key === group.sources[0] ? "Hide" : "Compare"}
+                </button>
+              </div>
+              {#if comparing?.key === group.sources[0]}
+                <CompareStrip
+                  sources={comparing.sources}
+                  keeper={comparing.keeper}
+                  entries={entriesBySource}
+                  busy={busy || pruning}
+                  onOpen={openInSystem}
+                  onReveal={reveal}
+                  onLeaveOut={(source) => void leaveOut([source])}
+                  onClose={() => (comparing = null)}
+                />
+              {/if}
             {/each}
+            {#if pruneKept.length > 0}
+              <p class="group-head">Left alone during the last removal</p>
+              {#each pruneKept as held (held.source)}
+                <p>
+                  <span class="mono truncate" title={held.source}>{baseName(held.source)}</span>
+                  <span class="faint tiny">{held.reason}</span>
+                </p>
+              {/each}
+            {/if}
             {#if identicalList.hidden > 0}
               <p class="faint tiny">
                 and {identicalList.hidden.toLocaleString()} more not shown.
@@ -1476,12 +1602,35 @@
               </span>
             </p>
             {#each lookalikeList.shown as found (found.keeper)}
-              <button class="suspect" onclick={() => marked = found.members}>
-                <span class="badge warn">{found.members.length} across {found.folders} folders</span>
-                <span class="reason">{formatBytes(found.extra_bytes)} beyond the largest.</span>
-                <span class="mono faint truncate">{baseName(found.keeper)}</span>
-                <span class="mono faint truncate">{found.members.map(baseName).join(" · ")}</span>
-              </button>
+              <div class="group-row">
+                <button class="suspect" onclick={() => marked = found.members}>
+                  <span class="badge warn">
+                    {found.members.length} across {found.folders} folders
+                  </span>
+                  <span class="reason">{formatBytes(found.extra_bytes)} beyond the largest.</span>
+                  <span class="mono faint truncate">{baseName(found.keeper)}</span>
+                  <span class="mono faint truncate">{found.members.map(baseName).join(" · ")}</span>
+                </button>
+                <button
+                  class="ghost"
+                  onclick={() => compare(found.keeper, found.members, found.keeper)}
+                  title="Look at every picture in this set side by side"
+                >
+                  {comparing?.key === found.keeper ? "Hide" : "Compare"}
+                </button>
+              </div>
+              {#if comparing?.key === found.keeper}
+                <CompareStrip
+                  sources={comparing.sources}
+                  keeper={comparing.keeper}
+                  entries={entriesBySource}
+                  busy={busy || pruning}
+                  onOpen={openInSystem}
+                  onReveal={reveal}
+                  onLeaveOut={(source) => void leaveOut([source])}
+                  onClose={() => (comparing = null)}
+                />
+              {/if}
             {/each}
             {#if lookalikeList.hidden > 0}
               <p class="faint tiny">and {lookalikeList.hidden.toLocaleString()} more not shown.</p>
@@ -1503,12 +1652,33 @@
               </span>
             </p>
             {#each burstList.shown as burst (burst.keeper)}
-              <button class="suspect" onclick={() => marked = burst.members}>
-                <span class="badge info">burst of {burst.members.length}</span>
-                <span class="reason">{formatBytes(burst.extra_bytes)} beyond the first shot.</span>
-                <span class="mono faint truncate">{burst.folder}</span>
-                <span class="mono faint">{burst.taken}</span>
-              </button>
+              <div class="group-row">
+                <button class="suspect" onclick={() => marked = burst.members}>
+                  <span class="badge info">burst of {burst.members.length}</span>
+                  <span class="reason">{formatBytes(burst.extra_bytes)} beyond the first shot.</span>
+                  <span class="mono faint truncate">{burst.folder}</span>
+                  <span class="mono faint">{burst.taken}</span>
+                </button>
+                <button
+                  class="ghost"
+                  onclick={() => compare(burst.keeper, burst.members, burst.keeper)}
+                  title="Look at every shot in this burst side by side"
+                >
+                  {comparing?.key === burst.keeper ? "Hide" : "Compare"}
+                </button>
+              </div>
+              {#if comparing?.key === burst.keeper}
+                <CompareStrip
+                  sources={comparing.sources}
+                  keeper={comparing.keeper}
+                  entries={entriesBySource}
+                  busy={busy || pruning}
+                  onOpen={openInSystem}
+                  onReveal={reveal}
+                  onLeaveOut={(source) => void leaveOut([source])}
+                  onClose={() => (comparing = null)}
+                />
+              {/if}
             {/each}
             {#if burstList.hidden > 0}
               <p class="faint tiny">and {burstList.hidden.toLocaleString()} more not shown.</p>
@@ -1609,6 +1779,11 @@
       Copies
     </button>
 
+    {#if leftOut.length > 0}
+      <button class="ghost" onclick={() => (leftOutOpen = !leftOutOpen)}>
+        {leftOut.length.toLocaleString()} left out
+      </button>
+    {/if}
     <button class="ghost" onclick={() => (issuesOpen = !issuesOpen)}>
       Issues {issueCount > 0 ? `(${issueCount})` : ""}
     </button>
@@ -1790,11 +1965,27 @@
     border-top: 1px solid var(--border);
   }
 
+  .group-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .group-row .suspect {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
   .issues-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 6px;
+  }
+
+  .heads {
+    display: flex;
+    gap: 6px;
   }
 
   .issues p {

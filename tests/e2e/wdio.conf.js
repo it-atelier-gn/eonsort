@@ -1,9 +1,12 @@
+import os from "os";
 import path from "path";
 import { execFileSync, spawn, spawnSync } from "child_process";
 import { fileURLToPath } from "url";
+import { build as buildFixture, clear as clearFixture } from "./fixture.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
+const fixtureRoot = path.join(os.tmpdir(), `eonsort-e2e-${process.pid}`);
 const exeSuffix = process.platform === "win32" ? ".exe" : "";
 const profile = process.env.EONSORT_RELEASE ? "release" : "debug";
 const appPath = path.resolve(
@@ -37,6 +40,9 @@ export const config = {
   },
 
   onPrepare: () => {
+    const fixture = buildFixture(fixtureRoot);
+    process.env.EONSORT_HOME = fixture.home;
+
     if (process.env.EONSORT_SKIP_BUILD) return;
     const features = process.env.EONSORT_FEATURES;
     const build = ["tauri", "build", "--no-bundle"];
@@ -94,6 +100,10 @@ export const config = {
 
   afterSession: () => {
     closeTauriDriver();
+  },
+
+  onComplete: () => {
+    clearFixture(fixtureRoot);
   },
 };
 

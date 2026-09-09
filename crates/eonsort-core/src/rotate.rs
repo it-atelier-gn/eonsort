@@ -185,6 +185,11 @@ fn reencoded(source: &Path, bytes: &[u8], transform: Transform) -> Result<Vec<u8
         path: source.to_path_buf(),
         message: e.to_string(),
     })?;
+
+    if format == image::ImageFormat::Jpeg && exif_write::carry_over(bytes, &mut out) {
+        exif_write::set_orientation(&mut out, 1);
+        exif_write::set_dimensions(&mut out, turned.width(), turned.height());
+    }
     Ok(out)
 }
 
@@ -420,6 +425,56 @@ mod tests {
         let turned = render(&source, Transform::Rotate90, true).unwrap();
         let image = pixels(&turned);
         assert_eq!((image.width(), image.height()), (49, 99));
+    }
+
+    #[test]
+    fn a_re_encoded_picture_keeps_what_the_camera_wrote() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("holiday.jpg");
+        fs::write(&source, jpeg_with_exif(99, 49, 6)).unwrap();
+
+        let turned = render(&source, Transform::Rotate90, true).unwrap();
+
+        assert_eq!(read_orientation_of(&turned), 1);
+
+        let mut cursor = std::io::Cursor::new(&turned);
+        let exif = exif::Reader::new()
+            .read_from_container(&mut cursor)
+            .unwrap();
+        let make = exif
+            .get_field(exif::Tag::Make, exif::In::PRIMARY)
+            .unwrap()
+            .display_value()
+            .to_string();
+        assert_eq!(make, "\"eonsort\"");
+    }
+
+    #[test]
+    fn a_re_encoded_picture_reports_the_size_it_now_has() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("holiday.jpg");
+        fs::write(&source, jpeg_with_exif(99, 49, 6)).unwrap();
+
+        let turned = render(&source, Transform::Rotate90, true).unwrap();
+
+        let mut cursor = std::io::Cursor::new(&turned);
+        let exif = exif::Reader::new()
+            .read_from_container(&mut cursor)
+            .unwrap();
+        let side = |tag| {
+            exif.get_field(tag, exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0)
+                .unwrap()
+        };
+        assert_eq!(
+            (
+                side(exif::Tag::PixelXDimension),
+                side(exif::Tag::PixelYDimension)
+            ),
+            (49, 99)
+        );
     }
 
     #[test]

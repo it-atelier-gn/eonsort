@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { BurstView, DuplicateReport, LookalikeView } from "$lib/api";
-import { listed, removableCopies, tallyBursts } from "$lib/copies";
+import type { BurstView, DuplicateReport, DuplicateView, LookalikeView } from "$lib/api";
+import { anyOnAShare, listed, onAShare, removableCopies, tallyBursts } from "$lib/copies";
 
 function burst(members: number, extra: number): BurstView {
   return {
@@ -24,12 +24,36 @@ describe("Showing a long list of copies", () => {
   });
 });
 
+describe("Spotting copies that sit on a share", () => {
+  const group = (sources: string[]): DuplicateView => ({
+    sources,
+    keeper: sources[0],
+    folder: "/",
+    bytes: 0,
+    wasted: 0,
+  });
+
+  it("knows a UNC path when it sees one", () => {
+    expect(onAShare("\\\\nas\\photos\\a.jpg")).toBe(true);
+    expect(onAShare("//nas/photos/a.jpg")).toBe(true);
+    expect(onAShare("D:\\Photos\\a.jpg")).toBe(false);
+    expect(onAShare("/home/pc/photos/a.jpg")).toBe(false);
+  });
+
+  it("reports a set holding one file on a share", () => {
+    expect(anyOnAShare([group(["D:\\a.jpg", "\\\\nas\\a.jpg"])])).toBe(true);
+    expect(anyOnAShare([group(["D:\\a.jpg", "E:\\a.jpg"])])).toBe(false);
+    expect(anyOnAShare([])).toBe(false);
+  });
+});
+
 describe("Counting what removing the extra copies would take", () => {
   const report = (files: number, groups: number): DuplicateReport => ({
     files,
     wasted: 0,
     groups: Array.from({ length: groups }, (_, i) => ({
       sources: [`/a${i}.jpg`, `/b${i}.jpg`],
+      keeper: `/a${i}.jpg`,
       folder: "/",
       bytes: 0,
       wasted: 0,

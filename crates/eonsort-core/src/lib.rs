@@ -25,7 +25,6 @@ pub mod similar;
 pub mod suspect;
 pub mod tagging;
 pub mod tags;
-pub mod undo;
 pub mod upright;
 pub mod verify;
 pub mod watch;
