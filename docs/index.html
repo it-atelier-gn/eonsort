@@ -120,6 +120,13 @@
   .fine{ margin-top:16px; font-size:.92rem; color:var(--ink-3); }
 
   .print-stage{ display:grid; gap:18px; }
+  .stage-cap{ font-size:15px; color:var(--ink-2); }
+
+  .steps{ list-style:none; margin:40px 0 0; padding:0; display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap:28px 40px; }
+  .steps li{ border-top:2px solid var(--ink); padding-top:18px; }
+  .steps .n{ display:inline-grid; place-items:center; width:30px; height:30px; border-radius:50%; background:var(--ink); color:var(--table); font:700 15px var(--sans); margin-bottom:12px; }
+  .steps h3{ font-size:1.25rem; letter-spacing:-.015em; margin-bottom:6px; }
+  .steps p{ color:var(--ink-2); }
   .print{
     position:relative; margin:0;
     background:#fff; padding:12px 12px 12px;
@@ -269,6 +276,7 @@
   <div class="wrap">
     <a href="#top" class="brand"><img src="favicon.png" alt="" />eonsort</a>
     <nav aria-label="Sections">
+      <a href="#how">How it works</a>
       <a href="#sources">Date sources</a>
       <a href="#clocks">Wrong clocks</a>
       <a href="#preview">Preview</a>
@@ -283,8 +291,8 @@
   <section class="hero">
     <div class="wrap">
       <div>
-        <h1>The date on the file is not always the date it was made.</h1>
-        <p class="lede">eonsort reads every independent source for when a file was made, flags the dates a reset camera clock got wrong, and sorts the rest into a date-based folder tree. You see the whole result before a byte is copied. Scanning and copying only ever read your sources.</p>
+        <h1>Sort years of photos into folders by the date they were taken.</h1>
+        <p class="lede">Point eonsort at your photo and video folders. It works out when each file was really made, shows you the finished folder tree, and copies only when you press Copy files. Your originals are never changed.</p>
         <div class="actions">
           <a class="btn btn-solid" id="primaryDownload" href="#download">Download</a>
           <a class="btn" href="https://github.com/it-atelier-gn/eonsort">Source on GitHub</a>
@@ -293,6 +301,7 @@
       </div>
 
       <div class="print-stage" id="stage" aria-describedby="verdict">
+        <p class="stage-cap">One photo, three dates. The file system says 2003, because the camera's clock had reset. The file name and the camera's own tag say May 2019.</p>
         <figure class="print">
           <svg viewBox="0 0 600 400" role="img" aria-label="A holiday photograph with the camera's date imprinted in the corner">
             <defs>
@@ -329,10 +338,28 @@
     </div>
   </section>
 
+  <section class="band" id="how">
+    <div class="wrap">
+      <div class="measure">
+        <h2>How it works</h2>
+        <p class="intro">Three steps, and nothing is copied until the last one.</p>
+      </div>
+      <ol class="steps">
+        <li><span class="n">1</span><h3>Choose the folders</h3><p>Pick the folders holding your photos and videos, and the place the sorted copy should go.</p></li>
+        <li><span class="n">2</span><h3>Scan and review</h3><p>eonsort reads every date each file carries and lays out the finished folder tree. Dates that look wrong are set aside under Issues, to check or fix by hand.</p></li>
+        <li><span class="n">3</span><h3>Copy files</h3><p>The files are copied into the tree. The originals stay exactly where they are, and Undo takes the copy back.</p></li>
+      </ol>
+      <figure class="demo">
+        <img src="demo.gif" alt="The eonsort desktop app scanning a folder of photographs: the planned tree fills in, a picture opens beside the date each source reports for it, then the charts and the timeline" loading="lazy" width="1000" height="641" />
+        <figcaption>Choose the folders, scan, review the plan, then copy.</figcaption>
+      </figure>
+    </div>
+  </section>
+
   <section class="band" id="sources">
     <div class="wrap">
       <div class="measure">
-        <h2>Every source, cross-checked.</h2>
+        <h2>Where the date comes from</h2>
         <p class="intro">Every source that reports a date is kept, and each one can be switched off. When they disagree, one of three rules decides which date is used.</p>
       </div>
 
@@ -362,7 +389,7 @@
   <section class="band" id="clocks">
     <div class="wrap anom">
       <div>
-        <h2>When the clock was wrong.</h2>
+        <h2>When a camera's clock was wrong</h2>
         <p class="intro">A camera whose battery has died resets its clock to a factory default, usually 1 January of 2000, 2003 or 2015, and every photo taken after that carries a date that looks entirely plausible. eonsort flags these rather than misfiling them silently.</p>
         <ul class="flags">
           <li><span class="f r" aria-label="flagged">✕</span><span>A date on a factory-reset instant, in the future, or later than the file was written.</span></li>
@@ -405,7 +432,7 @@
   <section class="band" id="preview">
     <div class="wrap">
       <div class="measure">
-        <h2>Nothing is written until you press Copy files.</h2>
+        <h2>Check the result before anything is copied</h2>
         <p class="intro">A scan only reads. What it produces is the complete destination tree, laid out exactly as the copy would create it, so the plan can be reviewed and corrected first.</p>
       </div>
       <dl class="defs">
@@ -414,17 +441,13 @@
         <div><dt>A closer look</dt><dd>Hold <kbd>Ctrl</kbd> and turn the wheel over the preview to zoom into a picture, then drag to pan it; the small buttons in the corner do the same, and the zoom clears with the next file.</dd></div>
         <div><dt>Corrections kept beside the plan</dt><dd>Overrides and rotations are stored next to the plan file. They survive reopening, they are what the copy uses, and each one can be undone.</dd></div>
       </dl>
-      <figure class="demo">
-        <img src="demo.gif" alt="The eonsort desktop app scanning a folder of photographs: the planned tree fills in, a picture opens beside the date each source reports for it, then the charts and the timeline" loading="lazy" width="1000" height="641" />
-        <figcaption>Choose the folders, scan, review the plan, then copy.</figcaption>
-      </figure>
     </div>
   </section>
 
   <section class="band" id="tree">
     <div class="wrap">
       <div class="measure">
-        <h2>A folder pattern, and a name to go with it.</h2>
+        <h2>Choose how the folders are named</h2>
         <p class="intro">A pattern is a date layout with fields mixed in: the city a photograph was taken in, the camera that took it, the name it arrived with. Several fields in a row, and the first one the file can answer wins.</p>
       </div>
       <div class="pattern">
@@ -456,7 +479,7 @@
   <section class="band" id="views">
     <div class="wrap">
       <div class="measure">
-        <h2>The same plan, from every angle.</h2>
+        <h2>Browse the whole collection</h2>
         <p class="intro">Each view scopes to whatever was selected, so the folder tree, Timeline, Gallery and Rings show only those files.</p>
       </div>
       <ul class="views">
@@ -502,7 +525,7 @@
   <section class="band" id="safety">
     <div class="wrap">
       <div class="measure">
-        <h2>Sorting never writes to your sources.</h2>
+        <h2>Your originals stay untouched</h2>
       </div>
       <dl class="guarantees">
         <div><dt>Nothing is overwritten</dt><dd>Same-name files are compared by content. Identical ones are left alone, different ones are stored beside them as <code>_dup_1</code>.</dd></div>
