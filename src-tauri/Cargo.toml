@@ -13,7 +13,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 default = []
-upright = ["eonsort-core/upright"]
 tagging = ["eonsort-core/tagging"]
 quality = ["eonsort-core/quality"]
 faces = ["eonsort-core/faces"]

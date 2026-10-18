@@ -606,7 +606,6 @@ mod tests {
                 follow_symlinks: false,
                 auto_rotate: false,
                 pair_companions: false,
-                upright_model_dir: None,
             };
             scan(&plan, &options, &AtomicBool::new(false), &|_| {}).unwrap();
             Self { dir, plan }
@@ -631,7 +630,6 @@ mod tests {
                 follow_symlinks: false,
                 auto_rotate: true,
                 pair_companions: false,
-                upright_model_dir: None,
             };
             scan(&plan, &options, &AtomicBool::new(false), &|_| {}).unwrap();
             Self { dir, plan }

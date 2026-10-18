@@ -82,8 +82,8 @@ jobs:
       - name: Test Rust
         run: cargo test --workspace
 
-  upright:
-    name: Upright feature
+  faces:
+    name: Faces feature
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
@@ -97,8 +97,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y nasm
-      - run: cargo clippy -p eonsort-core --features upright --all-targets -- -D warnings
-      - run: cargo test -p eonsort-core --features upright
+      - run: cargo clippy -p eonsort-core --features faces --all-targets -- -D warnings
+      - run: cargo test -p eonsort-core --features faces
 
   tagging:
     name: Tagging feature

@@ -7,7 +7,6 @@ use crate::model::{
 use crate::plan::{read_plan, Plan, PlanWriter};
 use crate::providers::{resolve, DetectOptions};
 use crate::rotate::Transform;
-use crate::upright::Detector;
 use chrono::Local;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -35,8 +34,6 @@ pub struct ScanOptions {
     pub auto_rotate: bool,
     #[serde(default = "yes")]
     pub pair_companions: bool,
-    #[serde(default)]
-    pub upright_model_dir: Option<PathBuf>,
 }
 
 fn yes() -> bool {
@@ -48,7 +45,6 @@ fn default_name_pattern() -> String {
 }
 
 struct Models<'a> {
-    upright: Option<&'a Detector>,
     gazetteer: Option<&'a crate::geocode::Gazetteer>,
 }
 
@@ -100,16 +96,11 @@ pub fn scan(
         None => PlanWriter::create(plan_path, &header)?,
     };
 
-    let upright = match &options.upright_model_dir {
-        Some(dir) => Some(Detector::load(dir)?),
-        None => None,
-    };
     let gazetteer = match &options.gazetteer {
         Some(dir) => Some(crate::geocode::Gazetteer::load(dir)?),
         None => None,
     };
     let models = Models {
-        upright: upright.as_ref(),
         gazetteer: gazetteer.as_ref(),
     };
 
@@ -223,21 +214,8 @@ fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions, models: &Models<
     };
     let from_exif = Transform::for_orientation(orientation);
 
-    let guess = match models.upright {
-        Some(detector) if orientation <= 1 => detector.guess(path).ok(),
-        _ => None,
-    };
-    let guessed = guess
-        .as_ref()
-        .filter(|guess| !guess.transform.is_identity());
-
-    let rotate_reason = guessed.map(|guess| guess.reason.clone());
-    let rotate = if !options.auto_rotate {
-        Transform::None
-    } else if !from_exif.is_identity() {
+    let rotate = if options.auto_rotate {
         from_exif
-    } else if turnable {
-        guessed.map(|guess| guess.transform).unwrap_or_default()
     } else {
         Transform::None
     };
@@ -272,7 +250,6 @@ fn analyse(path: &Path, meta: &Metadata, options: &ScanOptions, models: &Models<
             subject,
             orientation,
             rotate,
-            rotate_reason,
             reencode: false,
         }),
         Err(err) => PlanRecord::Skipped(SkippedEntry {
@@ -369,7 +346,6 @@ mod tests {
             follow_symlinks: false,
             auto_rotate: false,
             pair_companions: false,
-            upright_model_dir: None,
         }
     }
 

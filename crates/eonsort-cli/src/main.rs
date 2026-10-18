@@ -130,10 +130,6 @@ struct ScanArgs {
     /// belong to.
     #[arg(long)]
     split_companions: bool,
-    /// Folder holding the upright model weights. Given one, pictures whose metadata says nothing
-    /// about their orientation are looked at to work out which way is up.
-    #[arg(long)]
-    upright_models: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -466,7 +462,6 @@ fn run_scan(args: &ScanArgs, cancel: &AtomicBool) -> Result<(PathBuf, u64)> {
         follow_symlinks: args.follow_symlinks,
         auto_rotate: args.auto_rotate,
         pair_companions: !args.split_companions,
-        upright_model_dir: args.upright_models.clone(),
     };
 
     let plan_path = args.plan.clone().unwrap_or_else(|| {

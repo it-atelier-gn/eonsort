@@ -66,9 +66,6 @@ pub enum Error {
     Tagging(String),
 
     #[error("{0}")]
-    Upright(String),
-
-    #[error("{0}")]
     Diffuse(String),
 
     #[error("{0}")]

@@ -19,7 +19,6 @@ use eonsort_core::similar;
 use eonsort_core::suspect::{self, EntryFacts, Flag};
 use eonsort_core::tagging;
 use eonsort_core::tags;
-use eonsort_core::upright;
 use eonsort_core::verify::{VerifyOptions, VerifyProgress, VerifyReport};
 use eonsort_core::{default_plan_name, read_plan, validate_folder_pattern, Plan};
 use serde::{Deserialize, Serialize};
@@ -55,8 +54,6 @@ pub struct ScanRequest {
     pub auto_rotate: bool,
     #[serde(default)]
     pub pair_companions: bool,
-    #[serde(default)]
-    pub upright: bool,
     #[serde(default)]
     pub name_places: bool,
 }
@@ -234,7 +231,6 @@ fn scan_options(app: &AppHandle, request: &ScanRequest) -> Result<ScanOptions, S
         follow_symlinks: request.follow_symlinks,
         auto_rotate: request.auto_rotate,
         pair_companions: request.pair_companions,
-        upright_model_dir: request.upright.then(|| models_directory(app)).transpose()?,
     })
 }
 
@@ -1232,98 +1228,6 @@ fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
         .ok_or("no data directory available")?
         .join("models");
     Ok(dir)
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct UprightModelStatus {
-    pub present: bool,
-    pub bytes: u64,
-    pub total: u64,
-    pub built_in: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct UprightGuessView {
-    pub transform: String,
-    pub confidence: f32,
-    pub reason: String,
-}
-
-#[tauri::command]
-pub fn upright_model_status(app: AppHandle) -> Result<UprightModelStatus, String> {
-    let dir = models_directory(&app)?;
-    Ok(UprightModelStatus {
-        present: upright::installed(&dir),
-        bytes: upright::present_bytes(&dir),
-        total: upright::total_bytes(),
-        built_in: cfg!(feature = "upright"),
-    })
-}
-
-#[tauri::command]
-pub fn install_upright_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    if !cfg!(feature = "upright") {
-        return Err("this build was made without the upright model".into());
-    }
-
-    {
-        let mut fetching = state.fetching_upright.lock().unwrap();
-        if *fetching {
-            return Err("the upright model is already downloading".into());
-        }
-        *fetching = true;
-    }
-
-    state.upright_cancel.store(false, Ordering::Relaxed);
-    let dir = models_directory(&app)?;
-    let handle = app.clone();
-
-    std::thread::spawn(move || {
-        let state = handle.state::<AppState>();
-        let throttle = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
-
-        let result = upright::download(
-            &dir,
-            &state.upright_cancel,
-            &|progress: upright::UprightProgress| {
-                emit_throttled(&handle, "upright:progress", &progress, &throttle);
-            },
-        );
-        *state.fetching_upright.lock().unwrap() = false;
-
-        match result {
-            Ok(()) => {
-                let _ = handle.emit("upright:done", upright::present_bytes(&dir));
-            }
-            Err(err) => {
-                let _ = handle.emit("upright:error", err.to_string());
-            }
-        }
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn cancel_upright_install(state: State<'_, AppState>) {
-    state.upright_cancel.store(true, Ordering::Relaxed);
-}
-
-#[tauri::command]
-pub async fn guess_upright(app: AppHandle, source: PathBuf) -> Result<UprightGuessView, String> {
-    let dir = models_directory(&app)?;
-
-    tauri::async_runtime::spawn_blocking(move || {
-        upright::Detector::load(&dir).and_then(|detector| detector.guess(&source))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map(|guess| UprightGuessView {
-        transform: rotate_label(guess.transform).to_string(),
-        confidence: guess.confidence,
-        reason: guess.reason,
-    })
-    .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, Serialize)]

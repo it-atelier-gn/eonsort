@@ -1,4 +1,3 @@
-pub mod catalog;
 pub mod companion;
 pub mod copy;
 pub mod dateparse;
@@ -25,12 +24,10 @@ pub mod similar;
 pub mod suspect;
 pub mod tagging;
 pub mod tags;
-pub mod upright;
 pub mod verify;
 pub mod watch;
 pub mod weights;
 pub mod xmp_write;
-pub mod yolo;
 pub mod yunet;
 
 pub use error::{Error, Result};
