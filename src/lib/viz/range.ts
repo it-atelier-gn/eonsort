@@ -1,4 +1,4 @@
-import type { EntryView } from "$lib/api";
+import type { EntryView } from "#lib/api.ts";
 import { MONTHS } from "./charts";
 
 const HOUR = 3600;

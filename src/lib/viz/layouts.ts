@@ -1,5 +1,5 @@
-import type { EntryView, Provider } from "$lib/api";
-import { isSuspect } from "$lib/dates";
+import type { EntryView, Provider } from "#lib/api.ts";
+import { isSuspect } from "#lib/dates.ts";
 import { hourOfDay, type TimeAxis } from "./timeaxis";
 
 export const LANES: Provider[] = ["filename", "exif", "media", "filesystem"];

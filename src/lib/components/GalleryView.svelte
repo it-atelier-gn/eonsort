@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { convertFileSrc } from "@tauri-apps/api/core";
-  import { thumbnailFor, type EntryView } from "$lib/api";
-  import { createGallery } from "$lib/viz/gallery/scene";
-  import type { Room } from "$lib/viz/gallery";
+  import { thumbnailFor, type EntryView } from "#lib/api.ts";
+  import { createGallery } from "#lib/viz/gallery/scene.ts";
+  import type { Room } from "#lib/viz/gallery/index.ts";
 
   interface Props {
     entries: EntryView[];

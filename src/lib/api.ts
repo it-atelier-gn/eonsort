@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Sighting } from "$lib/tags";
+import type { Sighting } from "#lib/tags.ts";
 
 export type Provider =
   | "filename"

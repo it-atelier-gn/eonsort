@@ -1,5 +1,5 @@
-import type { EntryView } from "$lib/api";
-import type { FileColumnId } from "$lib/columns";
+import type { EntryView } from "#lib/api.ts";
+import type { FileColumnId } from "#lib/columns.ts";
 
 export interface Sorted<Id extends string = FileColumnId> {
   id: Id;

@@ -1,4 +1,4 @@
-import type { EntryView } from "$lib/api";
+import type { EntryView } from "#lib/api.ts";
 
 export const TILE_WIDTH = 0.62;
 export const TILE_HEIGHT = 0.44;

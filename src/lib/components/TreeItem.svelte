@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { formatBytes } from "$lib/api";
-  import { folderKey, type TreeNode } from "$lib/tree";
-  import type { TreeColumnId } from "$lib/columns";
+  import { formatBytes } from "#lib/api.ts";
+  import { folderKey, type TreeNode } from "#lib/tree.ts";
+  import type { TreeColumnId } from "#lib/columns.ts";
   import Self from "./TreeItem.svelte";
 
   interface Props {

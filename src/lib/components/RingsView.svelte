@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { thumbnailFor, type EntryView } from "$lib/api";
-  import { createRings, type Label, type Look } from "$lib/viz/rings/scene";
+  import { thumbnailFor, type EntryView } from "#lib/api.ts";
+  import { createRings, type Label, type Look } from "#lib/viz/rings/scene.ts";
   import {
     monthCss,
     MAX_FLY,
@@ -11,7 +11,7 @@
     RING_MODES,
     type Ring,
     type RingMode,
-  } from "$lib/viz/rings/layout";
+  } from "#lib/viz/rings/layout.ts";
 
   interface Props {
     entries: EntryView[];

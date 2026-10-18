@@ -1,4 +1,4 @@
-import type { Provider } from "$lib/api";
+import type { Provider } from "#lib/api.ts";
 
 export interface Source {
   id: Provider;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Spot } from "$lib/api";
-import type { Transform } from "$lib/api";
+import type { Spot } from "#lib/api.ts";
+import type { Transform } from "#lib/api.ts";
 import {
   BIG_ENOUGH,
   boxOf,
@@ -18,7 +18,7 @@ import {
   whoLabel,
   withName,
   withFaces,
-} from "$lib/faces";
+} from "#lib/faces.ts";
 
 const spot = (
   x: number,

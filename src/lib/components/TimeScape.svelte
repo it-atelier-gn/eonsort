@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { convertFileSrc } from "@tauri-apps/api/core";
-  import { thumbnailFor, type EntryView } from "$lib/api";
-  import { MODES, MODE_EXPLAINER, MODE_LABEL, type Mode } from "$lib/viz/layouts";
-  import { READINGS, READING_COLOUR, READING_LABEL, READING_NOTE } from "$lib/viz/charts";
-  import { createScene, type Tile } from "$lib/viz/scene";
-  import type { TimeAxis } from "$lib/viz/timeaxis";
+  import { thumbnailFor, type EntryView } from "#lib/api.ts";
+  import { MODES, MODE_EXPLAINER, MODE_LABEL, type Mode } from "#lib/viz/layouts.ts";
+  import { READINGS, READING_COLOUR, READING_LABEL, READING_NOTE } from "#lib/viz/charts.ts";
+  import { createScene, type Tile } from "#lib/viz/scene.ts";
+  import type { TimeAxis } from "#lib/viz/timeaxis.ts";
 
   interface Props {
     entries: EntryView[];

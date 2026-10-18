@@ -1,5 +1,5 @@
 <script lang="ts" generics="Id extends string">
-  import { columnOf, isColumnId, moveColumn, type ColumnSet } from "$lib/columns";
+  import { columnOf, isColumnId, moveColumn, type ColumnSet } from "#lib/columns.ts";
 
   interface Props {
     set: ColumnSet<Id>;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { BurstView, DuplicateReport, DuplicateView, LookalikeView } from "$lib/api";
-import { anyOnAShare, listed, onAShare, removableCopies, tallyBursts } from "$lib/copies";
+import type { BurstView, DuplicateReport, DuplicateView, LookalikeView } from "#lib/api.ts";
+import { anyOnAShare, listed, onAShare, removableCopies, tallyBursts } from "#lib/copies.ts";
 
 function burst(members: number, extra: number): BurstView {
   return {

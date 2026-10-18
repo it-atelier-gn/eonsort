@@ -1,5 +1,5 @@
-import type { EntryView } from "$lib/api";
-import { baseName } from "$lib/api";
+import type { EntryView } from "#lib/api.ts";
+import { baseName } from "#lib/api.ts";
 
 export interface CompareCard {
   source: string;

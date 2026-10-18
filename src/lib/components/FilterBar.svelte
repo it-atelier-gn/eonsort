@@ -1,10 +1,10 @@
 <script lang="ts">
-  import TagFilter from "$lib/components/TagFilter.svelte";
-  import WhoFilter from "$lib/components/WhoFilter.svelte";
-  import { anybody, whoLabel } from "$lib/faces";
-  import { pickedLabel, type TagCount, MAX_QUALITY, MIN_QUALITY } from "$lib/tags";
-  import type { NameCount } from "$lib/api";
-  import { dayValue, rangeLabel, rangeOfDays, type TimeRange } from "$lib/viz/range";
+  import TagFilter from "#lib/components/TagFilter.svelte";
+  import WhoFilter from "#lib/components/WhoFilter.svelte";
+  import { anybody, whoLabel } from "#lib/faces.ts";
+  import { pickedLabel, type TagCount, MAX_QUALITY, MIN_QUALITY } from "#lib/tags.ts";
+  import type { NameCount } from "#lib/api.ts";
+  import { dayValue, rangeLabel, rangeOfDays, type TimeRange } from "#lib/viz/range.ts";
 
   interface Props {
     range: TimeRange | null;

@@ -1,4 +1,4 @@
-import type { DuplicateReport, DuplicateView } from "$lib/api";
+import type { DuplicateReport, DuplicateView } from "#lib/api.ts";
 
 export const LIST_LIMIT = 200;
 

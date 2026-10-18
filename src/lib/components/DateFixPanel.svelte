@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { EntryView, OffsetView, Provider } from "$lib/api";
-  import { describeShift, fromInputValue, toInputValue } from "$lib/dates";
-  import { FALLBACK_PROVIDER, offeredBy, pickProvider } from "$lib/sources";
+  import type { EntryView, OffsetView, Provider } from "#lib/api.ts";
+  import { describeShift, fromInputValue, toInputValue } from "#lib/dates.ts";
+  import { FALLBACK_PROVIDER, offeredBy, pickProvider } from "#lib/sources.ts";
 
   interface Props {
     entries: EntryView[];

@@ -42,7 +42,7 @@ import {
   TILE_FRAGMENT,
   TILE_VERTEX,
 } from "./shaders";
-import type { EntryView } from "$lib/api";
+import type { EntryView } from "#lib/api.ts";
 
 export const MORPH_MS = 900;
 export const GLIDE_MS = 700;

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { EntryView } from "$lib/api";
-  import { formatBytes } from "$lib/api";
+  import type { EntryView } from "#lib/api.ts";
+  import { formatBytes } from "#lib/api.ts";
   import {
     formatYear,
     heatStep,
@@ -17,7 +17,7 @@
     READING_LABEL,
     READING_NOTE,
     HEAT_STEPS,
-  } from "$lib/viz/charts";
+  } from "#lib/viz/charts.ts";
   import {
     heatGrid,
     planRange,
@@ -28,7 +28,7 @@
     type HeatCell,
     type HeatRow,
     type TimeRange,
-  } from "$lib/viz/range";
+  } from "#lib/viz/range.ts";
 
   interface Props {
     entries: EntryView[];
