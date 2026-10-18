@@ -347,7 +347,7 @@
       <ol class="steps">
         <li><span class="n">1</span><h3>Choose the folders</h3><p>Pick the folders holding your photos and videos, and the place the sorted copy should go.</p></li>
         <li><span class="n">2</span><h3>Scan and review</h3><p>eonsort reads every date each file carries and lays out the finished folder tree. Dates that look wrong are set aside under Issues, to check or fix by hand.</p></li>
-        <li><span class="n">3</span><h3>Copy files</h3><p>The files are copied into the tree. The originals stay exactly where they are, and Undo takes the copy back.</p></li>
+        <li><span class="n">3</span><h3>Copy files</h3><p>The files are copied into the tree. The originals stay exactly where they are.</p></li>
       </ol>
       <figure class="demo">
         <img src="demo.gif" alt="The eonsort desktop app scanning a folder of photographs: the planned tree fills in, a picture opens beside the date each source reports for it, then the charts and the timeline" loading="lazy" width="1000" height="641" />
@@ -459,10 +459,9 @@
         </ul>
       </div>
       <dl class="defs" style="margin-top:40px">
-        <div><dt>Places, worked out here</dt><dd>The city, region and country come from the picture's own GPS reading, matched against a list of places kept on this machine. One button fetches the list, about 11 MB. Nothing leaves the computer.</dd></div>
+        <div><dt>Places, worked out here</dt><dd>The city, region and country come from the picture's own GPS reading, matched against a list of places kept on this machine. One button fetches the list, about 14 MB. Nothing leaves the computer.</dd></div>
         <div><dt>Ready-made layouts</dt><dd>Plain, by day, by place, and layouts matching immich, PhotoPrism and elodie.</dd></div>
         <div><dt>RAW read all the way through</dt><dd>A RAW file is read through the preview the camera stores inside it, so it is deduplicated, turned upright, scored and searched for faces like any other picture.</dd></div>
-        <div><dt>A copy that can be taken back</dt><dd>Undo removes what the copy wrote and nothing else. A file that was already there, or edited since it landed, stays where it stands, and only the folders the copy made are cleared away. Sources are never touched.</dd></div>
       </dl>
 
       <h3 class="subhead">Four things a date alone will not fix</h3>
@@ -539,7 +538,7 @@
     <div class="wrap">
       <div class="measure">
         <h2>Download eonsort <span id="version"></span></h2>
-        <p class="intro">Free and open source under the MIT license. Every installer carries all the optional features: turning pictures upright, tagging, rating and faces.</p>
+        <p class="intro">Free and open source under the MIT license. Every installer carries all the optional features: tagging, rating and faces.</p>
       </div>
       <div class="dl">
         <div>
@@ -581,8 +580,7 @@ eonsort sort --source "D:\Photos" --destination "E:\Sorted"
 <span class="c"># or run the phases separately</span>
 eonsort scan --source "D:\Photos" --plan photos.jsonl
 eonsort show --plan photos.jsonl --suspect
-eonsort copy --plan photos.jsonl --destination "E:\Sorted"
-eonsort undo --plan photos.jsonl</pre>
+eonsort copy --plan photos.jsonl --destination "E:\Sorted"</pre>
         </div>
       </div>
     </div>

@@ -172,7 +172,6 @@ mod tests {
             caption: None,
             orientation: 0,
             rotate: Default::default(),
-            rotate_reason: None,
             reencode: false,
         }
     }

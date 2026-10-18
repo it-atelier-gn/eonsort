@@ -587,7 +587,7 @@
           <button
             disabled={busy}
             onclick={getGazetteer}
-            title="Downloads about 11 MB of place names, once"
+            title="Downloads about 14 MB of place names, once"
           >
             Get the place names
           </button>
