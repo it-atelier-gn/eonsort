@@ -30,7 +30,7 @@ build it yourself.
 **Prerequisites**
 
 - [Rust](https://rustup.rs/) 1.87+
-- [Node.js](https://nodejs.org/) 20+ with npm
+- [Node.js](https://nodejs.org/) 22.17+ with npm
 - [CMake](https://cmake.org/) and [NASM](https://nasm.us/), for the bundled libjpeg-turbo
 - Linux: `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf`
 - Windows: the [WebView2 runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/), pre-installed on Windows 11 and most Windows 10
