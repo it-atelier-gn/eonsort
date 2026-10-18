@@ -658,7 +658,7 @@ dependencies = [
  "tokenizers 0.22.2",
  "yoke",
  "zerocopy",
- "zip",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -1693,7 +1693,7 @@ dependencies = [
  "ureq",
  "walkdir",
  "windows 0.62.2",
- "zip",
+ "zip 9.0.5",
 ]
 
 [[package]]
@@ -7800,9 +7800,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
 dependencies = [
  "crc32fast",
+ "indexmap 2.14.0",
+ "memchr",
+ "typed-path",
+]
+
+[[package]]
+name = "zip"
+version = "9.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e"
+dependencies = [
+ "crc32fast",
  "flate2",
  "indexmap 2.14.0",
  "memchr",
+ "nix",
  "typed-path",
  "zopfli",
 ]
