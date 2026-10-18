@@ -38,7 +38,7 @@ import {
 } from "./shaders";
 import { buildTimeAxis, type TimeAxis } from "./timeaxis";
 import { flightOrbit, flightWaypoints, FLIGHT_BINS, FLIGHT_MS, type Waypoint } from "./flight";
-import type { EntryView } from "$lib/api";
+import type { EntryView } from "#lib/api.ts";
 
 export const MORPH_MS = 900;
 export const MAX_INSTANCES = 200_000;

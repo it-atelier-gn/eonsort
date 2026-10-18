@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agree, cards, folderOf } from "$lib/compare";
-import type { EntryView } from "$lib/api";
+import { agree, cards, folderOf } from "#lib/compare.ts";
+import type { EntryView } from "#lib/api.ts";
 
 function entry(source: string, taken: string, size: number): EntryView {
   return {

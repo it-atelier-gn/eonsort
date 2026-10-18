@@ -19,8 +19,8 @@
     type GazetteerStatus,
     type Preset,
     type TagModelStatus,
-  } from "$lib/api";
-  import type { Provider, Settings, Strategy } from "$lib/api";
+  } from "#lib/api.ts";
+  import type { Provider, Settings, Strategy } from "#lib/api.ts";
   import {
     atDefaultOrder,
     atDefaults,
@@ -33,7 +33,7 @@
     sourceOf,
     toggled,
     weightsFor,
-  } from "$lib/sources";
+  } from "#lib/sources.ts";
 
   interface Props {
     settings: Settings;

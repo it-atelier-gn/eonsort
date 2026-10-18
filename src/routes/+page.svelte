@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { dev } from "$app/environment";
+  import { dev } from "$app/env";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
   import {
@@ -28,8 +28,8 @@
     tagModelStatus,
     type NameCount,
     type Spot,
-  } from "$lib/api";
-  import { BOXES_KEY, countFaces, showBoxes, tally, wearingAll } from "$lib/faces";
+  } from "#lib/api.ts";
+  import { BOXES_KEY, countFaces, showBoxes, tally, wearingAll } from "#lib/faces.ts";
   import {
     listFolders,
     listSkipped,
@@ -74,10 +74,10 @@
     type SuspectGroup,
     type VerifyProgress,
     type VerifyReport,
-  } from "$lib/api";
-  import { buildTree, foldersOf, under, type TreeNode } from "$lib/tree";
-  import { anyOnAShare, listed, removableCopies, tallyBursts } from "$lib/copies";
-  import ColumnHead from "$lib/components/ColumnHead.svelte";
+  } from "#lib/api.ts";
+  import { buildTree, foldersOf, under, type TreeNode } from "#lib/tree.ts";
+  import { anyOnAShare, listed, removableCopies, tallyBursts } from "#lib/copies.ts";
+  import ColumnHead from "#lib/components/ColumnHead.svelte";
   import {
     cleanOrder,
     cleanPane,
@@ -98,32 +98,32 @@
     type ColumnWidths,
     type FileColumnId,
     type TreeColumnId,
-  } from "$lib/columns";
+  } from "#lib/columns.ts";
   import {
     cleanLook,
     cleanTile,
     LOOK_KEY,
     TILE_KEY,
     type Look,
-  } from "$lib/look";
-  import { appVersion, releaseUrl, versionLabel } from "$lib/version";
-  import SetupPanel from "$lib/components/SetupPanel.svelte";
-  import TreeItem from "$lib/components/TreeItem.svelte";
-  import FileList from "$lib/components/FileList.svelte";
+  } from "#lib/look.ts";
+  import { appVersion, releaseUrl, versionLabel } from "#lib/version.ts";
+  import SetupPanel from "#lib/components/SetupPanel.svelte";
+  import TreeItem from "#lib/components/TreeItem.svelte";
+  import FileList from "#lib/components/FileList.svelte";
   import {
     SORT_KEY,
     cleanSort,
     nextSort,
     type Sorted,
-  } from "$lib/ordering";
-  import PreviewPane from "$lib/components/PreviewPane.svelte";
-  import CompareStrip from "$lib/components/CompareStrip.svelte";
-  import DateFixPanel from "$lib/components/DateFixPanel.svelte";
-  import TimeScape from "$lib/components/TimeScape.svelte";
-  import ChartsPanel from "$lib/components/ChartsPanel.svelte";
-  import GalleryView from "$lib/components/GalleryView.svelte";
-  import RingsView from "$lib/components/RingsView.svelte";
-  import FilterBar from "$lib/components/FilterBar.svelte";
+  } from "#lib/ordering.ts";
+  import PreviewPane from "#lib/components/PreviewPane.svelte";
+  import CompareStrip from "#lib/components/CompareStrip.svelte";
+  import DateFixPanel from "#lib/components/DateFixPanel.svelte";
+  import TimeScape from "#lib/components/TimeScape.svelte";
+  import ChartsPanel from "#lib/components/ChartsPanel.svelte";
+  import GalleryView from "#lib/components/GalleryView.svelte";
+  import RingsView from "#lib/components/RingsView.svelte";
+  import FilterBar from "#lib/components/FilterBar.svelte";
   import {
     keepsQuality,
     keepsTags,
@@ -132,8 +132,8 @@
     type Sighting,
     MIN_QUALITY,
     UNTAGGED,
-  } from "$lib/tags";
-  import { filterRange, sameRange, type TimeRange } from "$lib/viz/range";
+  } from "#lib/tags.ts";
+  import { filterRange, sameRange, type TimeRange } from "#lib/viz/range.ts";
 
   type Job = "scan" | "copy" | "verify";
 

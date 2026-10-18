@@ -1,4 +1,4 @@
-import type { NameCount, Spot, Transform } from "$lib/api";
+import type { NameCount, Spot, Transform } from "#lib/api.ts";
 
 export interface Box {
   left: string;

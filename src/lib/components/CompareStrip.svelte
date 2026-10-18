@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { formatBytes, thumbnailFor, type EntryView } from "$lib/api";
-  import { agree, cards, type CompareCard } from "$lib/compare";
+  import { formatBytes, thumbnailFor, type EntryView } from "#lib/api.ts";
+  import { agree, cards, type CompareCard } from "#lib/compare.ts";
 
   interface Props {
     sources: string[];

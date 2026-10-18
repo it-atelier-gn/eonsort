@@ -1,4 +1,4 @@
-import type { EntryView } from "$lib/api";
+import type { EntryView } from "#lib/api.ts";
 
 export const ROOM_HEIGHT = 6.5;
 export const WALL = 0.45;

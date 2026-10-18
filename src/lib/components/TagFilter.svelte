@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { allPicked, labelOf, matching, pickedLabel, withTag, type TagCount } from "$lib/tags";
+  import { allPicked, labelOf, matching, pickedLabel, withTag, type TagCount } from "#lib/tags.ts";
 
   interface Props {
     counts: TagCount[];

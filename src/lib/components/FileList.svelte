@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { formatBytes, thumbnailFor, type EntryView } from "$lib/api";
-  import { CONFIDENCE_LABEL, CONFIDENCE_TONE, hardFlags, isSuspect } from "$lib/dates";
-  import { labelOf } from "$lib/tags";
-  import { nextRow, nextTile } from "$lib/rows";
-  import { perRow, THUMBNAIL_EDGE, TILE_GAP, TILE_SIZES, type Look } from "$lib/look";
+  import { formatBytes, thumbnailFor, type EntryView } from "#lib/api.ts";
+  import { CONFIDENCE_LABEL, CONFIDENCE_TONE, hardFlags, isSuspect } from "#lib/dates.ts";
+  import { labelOf } from "#lib/tags.ts";
+  import { nextRow, nextTile } from "#lib/rows.ts";
+  import { perRow, THUMBNAIL_EDGE, TILE_GAP, TILE_SIZES, type Look } from "#lib/look.ts";
   import ColumnHead from "./ColumnHead.svelte";
-  import { sortedEntries, type Sorted } from "$lib/ordering";
+  import { sortedEntries, type Sorted } from "#lib/ordering.ts";
   import {
     FILE_COLUMNS,
     template,
     widthOf,
     type ColumnWidths,
     type FileColumnId,
-  } from "$lib/columns";
+  } from "#lib/columns.ts";
 
   interface Props {
     entries: EntryView[];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fittedTo } from "$lib/fit";
+import { fittedTo } from "#lib/fit.ts";
 
 const room = { width: 300, height: 220 };
 

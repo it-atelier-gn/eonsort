@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { anybody, matchingNames, whoLabel, withName } from "$lib/faces";
-  import type { NameCount } from "$lib/api";
+  import { anybody, matchingNames, whoLabel, withName } from "#lib/faces.ts";
+  import type { NameCount } from "#lib/api.ts";
 
   interface Props {
     names: NameCount[];

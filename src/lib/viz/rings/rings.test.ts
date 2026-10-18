@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EntryView } from "$lib/api";
+import type { EntryView } from "#lib/api.ts";
 import {
   buildRings,
   clampHeight,

@@ -8,16 +8,16 @@
     type NameCount,
     type Preview,
     type Spot,
-  } from "$lib/api";
-  import { boxOf as faceBox, pickable, sureFaces } from "$lib/faces";
-  import { CONFIDENCE_LABEL, CONFIDENCE_TONE, fromInputValue, toInputValue } from "$lib/dates";
-  import { labelOf } from "$lib/tags";
+  } from "#lib/api.ts";
+  import { boxOf as faceBox, pickable, sureFaces } from "#lib/faces.ts";
+  import { CONFIDENCE_LABEL, CONFIDENCE_TONE, fromInputValue, toInputValue } from "#lib/dates.ts";
+  import { labelOf } from "#lib/tags.ts";
   import {
     VISUAL_PANE,
     VISUAL_PANE_KEY,
     clampVisual,
     cleanVisual,
-  } from "$lib/columns";
+  } from "#lib/columns.ts";
   import {
     TRANSFORM_CSS,
     canTurn,
@@ -25,8 +25,8 @@
     forOrientation,
     swapsAxes,
     undone,
-  } from "$lib/rotate";
-  import { fittedTo } from "$lib/fit";
+  } from "#lib/rotate.ts";
+  import { fittedTo } from "#lib/fit.ts";
   import {
     isResting,
     pannedBy,
@@ -37,7 +37,7 @@
     zoomedAt,
     RESTING,
     type Zoom,
-  } from "$lib/zoom";
+  } from "#lib/zoom.ts";
 
   interface Props {
     entry: EntryView | null;

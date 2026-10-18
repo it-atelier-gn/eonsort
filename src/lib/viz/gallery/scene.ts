@@ -26,7 +26,7 @@ import {
   ROOM_FRAGMENT,
   ROOM_VERTEX,
 } from "./shaders";
-import type { EntryView } from "$lib/api";
+import type { EntryView } from "#lib/api.ts";
 
 export const DRAW_DISTANCE = 62;
 export const NEAR_DISTANCE = 26;

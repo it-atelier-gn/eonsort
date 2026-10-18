@@ -1,5 +1,5 @@
-import type { EntryView, Provider } from "$lib/api";
-import { isSuspect } from "$lib/dates";
+import type { EntryView, Provider } from "#lib/api.ts";
+import { isSuspect } from "#lib/dates.ts";
 
 export const PROVIDER_ORDER: Provider[] = [
   "filename",
